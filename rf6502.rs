@@ -130,14 +130,14 @@ const NES_CPU: bool = false;
 //#define FLAG_SIGN      0x80
 
 // TODO: Adopt the nicer syntax from the sprocket-nes project
-const FLAG_CARRY: u8 = 0x01;
-const FLAG_ZERO: u8 = 0x02;
-const FLAG_INTERRUPT: u8 = 0x04;
-const FLAG_DECIMAL: u8 = 0x08;
-const FLAG_BREAK: u8 = 0x10;
-const FLAG_CONSTANT: u8 = 0x20;
-const FLAG_OVERFLOW: u8 = 0x40;
-const FLAG_SIGN: u8 = 0x80;
+const FLAG_CARRY:       u8 = 0x01;
+const FLAG_ZERO:        u8 = 0x02;
+const FLAG_INTERRUPT:   u8 = 0x04;
+const FLAG_DECIMAL:     u8 = 0x08;
+const FLAG_BREAK:       u8 = 0x10;
+const FLAG_CONSTANT:    u8 = 0x20;
+const FLAG_OVERFLOW:    u8 = 0x40;
+const FLAG_SIGN:        u8 = 0x80;
 
 //#define BASE_STACK     0x100
 /* I'm guessing at the type here... */
@@ -169,13 +169,15 @@ struct CPU {
     // Some of these are probably not needed in the struct, but for a direct port, it's easiest,
     // perhaps, to start out not trying to reason about whether a variable's state being carried
     // over between calls will matter.
-    oldpc: u32,
-    ea: u32,
-    reladdr: u32,
-    value: u32,
-    result: u32,
-    opcode: u32,
-    oldstatus: u32,
+    oldpc: u16,
+    // EA = Effective Address? This one *is* needed: Addressing modes are implemented as functions
+    // that read a byte and set this value to the appropriate address.
+    ea: u16,
+    reladdr: u16,
+    value: u16,
+    result: u16,
+    opcode: u8,
+    oldstatus: u8,
 }
 
 //externally supplied functions
@@ -200,8 +202,7 @@ impl CPU {
     // CPU struct to own its memory.
 
     fn new() -> CPU {
-        let cpu = CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 };
-        cpu
+        CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 };
     }
 
     // TODO: Figure out how to deal with the overflow problem. In C, it would have wrapped around,
@@ -211,6 +212,9 @@ impl CPU {
     // Thing of note: Std::num::Wrapping can be put around a u8, u16, etc., to make arithmetic on
     // that type wrap on overflow. That may be what we want if we want to mimick C's semantics.
     // Which would probably come closest to duplicating the behavior of the C source.
+    //
+    // (I found out it panics only in debug mode. But that definitely doesn't mean we should
+    // just always run in release mode.)
 
     //a few general functions used by various other functions
     //void push16(uint16_t pushval) {
