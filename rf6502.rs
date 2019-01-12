@@ -115,6 +115,8 @@
                      //CPU in the Nintendo Entertainment System does not
                      //support BCD operation.
 
+use std::num::Wrapping;
+
 const UNDOCUMENTED: bool = false;
 const NES_CPU: bool = false;
 
@@ -127,6 +129,7 @@ const NES_CPU: bool = false;
 //#define FLAG_OVERFLOW  0x40
 //#define FLAG_SIGN      0x80
 
+// TODO: Adopt the nicer syntax from the sprocket-nes project
 const FLAG_CARRY: u8 = 0x01;
 const FLAG_ZERO: u8 = 0x02;
 const FLAG_INTERRUPT: u8 = 0x04;
@@ -139,7 +142,6 @@ const FLAG_SIGN: u8 = 0x80;
 //#define BASE_STACK     0x100
 /* I'm guessing at the type here... */
 const BASE_STACK: u16 = 0x100;
-
 
 //6502 CPU registers
 //uint16_t pc;
@@ -166,7 +168,7 @@ struct CPU {
     clockgoal: u32,
     // Some of these are probably not needed in the struct, but for a direct port, it's easiest,
     // perhaps, to start out not trying to reason about whether a variable's state being carried
-    // over will matter.
+    // over between calls will matter.
     oldpc: u32,
     ea: u32,
     reladdr: u32,
@@ -190,12 +192,25 @@ trait Memory {
 }
 
 impl CPU {
-    // You're going to notice that all of these functions take a 'mem' value that must imply trait
-    // Memory as an argument argument alongside the CPU struct.
+    // You're going to notice that nearly all of these functions take a 'mem' value that must imply
+    // trait Memory as an argument argument alongside the CPU struct.
     //
     // This may prove to have been a mistake, or may not. I felt that it would allow for more
     // flexibility on the caller's part and perhaps less borrowing tangles if we do not require the
     // CPU struct to own its memory.
+
+    fn new() -> CPU {
+        let cpu = CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 };
+        cpu
+    }
+
+    // TODO: Figure out how to deal with the overflow problem. In C, it would have wrapped around,
+    // I think; in Rust, it panics. Wrap-around is probably more authentic. We're going to run into
+    // this later on as well.
+    //
+    // Thing of note: Std::num::Wrapping can be put around a u8, u16, etc., to make arithmetic on
+    // that type wrap on overflow. That may be what we want if we want to mimick C's semantics.
+    // Which would probably come closest to duplicating the behavior of the C source.
 
     //a few general functions used by various other functions
     //void push16(uint16_t pushval) {
@@ -203,10 +218,6 @@ impl CPU {
     //    write6502(BASE_STACK + ((sp - 1) & 0xFF), pushval & 0xFF);
     //    sp -= 2;
     //}
-    fn new() -> CPU {
-        CPU { pc: 0, sp: 255, a: 0, x: 0, y: 0, status: 0, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 }
-    }
-
     fn push16<T: Memory>(&mut self, mem: &mut T, pushval: u16) {
         mem.write(BASE_STACK + (self.sp as u16), ((pushval >> 8) & 0x00FF) as u8);
         self.sp -= 1;
@@ -217,7 +228,6 @@ impl CPU {
     //void push8(uint8_t pushval) {
     //    write6502(BASE_STACK + sp--, pushval);
     //}
-
     fn push8<T: Memory>(&mut self, mem: &mut T, pushval: u8) {
         mem.write(BASE_STACK + (self.sp as u16), pushval);
         self.sp -= 1;
@@ -229,10 +239,21 @@ impl CPU {
     //    sp += 2;
     //    return(temp16);
     //}
+    fn pull16<T: Memory>(&mut self, mem: &T) -> u16 {
+        let mut val: u16 = mem.read(BASE_STACK + ((self.sp as u16 + 1) & 0x00FF)) as u16;
+        val            |= (mem.read(BASE_STACK + ((self.sp as u16 + 2) & 0x00FF)) as u16) << 8;
+        self.sp += 2;
+        val
+    }
 
     //uint8_t pull8() {
     //    return (read6502(BASE_STACK + ++sp));
     //}
+    fn pull8<T: Memory>(&mut self, mem: &T) -> u8 {
+        let val = mem.read(BASE_STACK + (self.sp as u16));
+        self.sp += 1;
+        val
+    }
 
     //void reset6502() {
     //    pc = (uint16_t)read6502(0xFFFC) | ((uint16_t)read6502(0xFFFD) << 8);
@@ -242,6 +263,14 @@ impl CPU {
     //    sp = 0xFD;
     //    status |= FLAG_CONSTANT;
     //}
+    fn reset<T: Memory>(&mut self, mem: &T) {
+        self.pc = mem.read(0xFFFC) as u16 | ((mem.read(0xFFFD) as u16) << 8);
+        self.a = 0;
+        self.x = 0;
+        self.y = 0;
+        self.sp = 0xFD;
+        self.status |= FLAG_CONSTANT;
+    }
 }
 
 //#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
@@ -1042,19 +1071,23 @@ impl CPU {
 //}
 
 /* For testing purposes */
-struct DbgMem { }
+struct DbgMem {
+    mem: [u8; 65535],
+}
 impl Memory for DbgMem {
     fn read(&self, address: u16) -> u8 {
         println!("READ: {} (returning 0)", address);
-        0
+        self.mem[address as usize]
     }
     fn write(&mut self, address: u16, value: u8) {
-        println!("WRITE: Set address {} = {} (not actually writing)", address, value);
+        println!("WRITE: Set address {} = {}", address, value);
+        self.mem[address as usize] = value;
     }
 }
 fn main() {
     let mut tpu = CPU::new();
-    let mut dbgm = DbgMem { };
+    let mut dbgm = DbgMem { mem: [0 as u8; 65535] };
     let our_val: u16 = 65535;
     tpu.push16(&mut dbgm, our_val);
+    assert!(tpu.pull16(&mut dbgm) == our_val);
 }
