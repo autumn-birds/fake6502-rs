@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 /* Fake6502 CPU emulator core v1.1 *******************
  * (c)2011 Mike Chambers (miker00lz@gmail.com)       *
  *****************************************************
@@ -139,8 +140,111 @@ const FLAG_SIGN: u8 = 0x80;
 /* I'm guessing at the type here... */
 const BASE_STACK: u16 = 0x100;
 
-//#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
 
+//6502 CPU registers
+//uint16_t pc;
+//uint8_t sp, a, x, y, status;
+
+//helper variables
+//uint32_t instructions = 0; //keep track of total instructions executed
+//uint32_t clockticks6502 = 0, clockgoal6502 = 0;
+//uint16_t oldpc, ea, reladdr, value, result;
+//uint8_t opcode, oldstatus;
+
+struct CPU {
+    /* 6502 CPU registers: */
+    pc: u16,
+    sp: u8,
+    a: u8,
+    x: u8,
+    y: u8,
+    status: u8,
+
+    /* Helper variables: */
+    instructions_ran: u32,
+    clockticks: u32,
+    clockgoal: u32,
+    // Some of these are probably not needed in the struct, but for a direct port, it's easiest,
+    // perhaps, to start out not trying to reason about whether a variable's state being carried
+    // over will matter.
+    oldpc: u32,
+    ea: u32,
+    reladdr: u32,
+    value: u32,
+    result: u32,
+    opcode: u32,
+    oldstatus: u32,
+}
+
+//externally supplied functions
+//extern uint8_t read6502(uint16_t address);
+//extern void write6502(uint16_t address, uint8_t value);
+
+trait Memory {
+    // It might make sense to just use a &mut [u8] for example, but I feel like there's probably a
+    // reason the original code did it this way: Any special behavior or mappings for special
+    // memory addresses you want to have in the callback function, you can have.  (Consider e.g.
+    // real systems where writing to a particular address actually controlled hardware.)
+    fn read(&self, address: u16) -> u8;
+    fn write(&mut self, address: u16, value: u8);
+}
+
+impl CPU {
+    // You're going to notice that all of these functions take a 'mem' value that must imply trait
+    // Memory as an argument argument alongside the CPU struct.
+    //
+    // This may prove to have been a mistake, or may not. I felt that it would allow for more
+    // flexibility on the caller's part and perhaps less borrowing tangles if we do not require the
+    // CPU struct to own its memory.
+
+    //a few general functions used by various other functions
+    //void push16(uint16_t pushval) {
+    //    write6502(BASE_STACK + sp, (pushval >> 8) & 0xFF);
+    //    write6502(BASE_STACK + ((sp - 1) & 0xFF), pushval & 0xFF);
+    //    sp -= 2;
+    //}
+    fn new() -> CPU {
+        CPU { pc: 0, sp: 255, a: 0, x: 0, y: 0, status: 0, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 }
+    }
+
+    fn push16<T: Memory>(&mut self, mem: &mut T, pushval: u16) {
+        mem.write(BASE_STACK + (self.sp as u16), ((pushval >> 8) & 0x00FF) as u8);
+        self.sp -= 1;
+        mem.write(BASE_STACK + (self.sp as u16), (pushval & 0x00FF) as u8);
+        self.sp -= 1;
+    }
+
+    //void push8(uint8_t pushval) {
+    //    write6502(BASE_STACK + sp--, pushval);
+    //}
+
+    fn push8<T: Memory>(&mut self, mem: &mut T, pushval: u8) {
+        mem.write(BASE_STACK + (self.sp as u16), pushval);
+        self.sp -= 1;
+    }
+
+    //uint16_t pull16() {
+    //    uint16_t temp16;
+    //    temp16 = read6502(BASE_STACK + ((sp + 1) & 0xFF)) | ((uint16_t)read6502(BASE_STACK + ((sp + 2) & 0xFF)) << 8);
+    //    sp += 2;
+    //    return(temp16);
+    //}
+
+    //uint8_t pull8() {
+    //    return (read6502(BASE_STACK + ++sp));
+    //}
+
+    //void reset6502() {
+    //    pc = (uint16_t)read6502(0xFFFC) | ((uint16_t)read6502(0xFFFD) << 8);
+    //    a = 0;
+    //    x = 0;
+    //    y = 0;
+    //    sp = 0xFD;
+    //    status |= FLAG_CONSTANT;
+    //}
+}
+
+//#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
 
 //flag modifier macros
 //#define setcarry() status |= FLAG_CARRY
@@ -155,7 +259,6 @@ const BASE_STACK: u16 = 0x100;
 //#define clearoverflow() status &= (~FLAG_OVERFLOW)
 //#define setsign() status |= FLAG_SIGN
 //#define clearsign() status &= (~FLAG_SIGN)
-
 
 //flag calculation macros
 //#define zerocalc(n) {\
@@ -178,52 +281,6 @@ const BASE_STACK: u16 = 0x100;
 //        else clearoverflow();\
 //}
 
-
-//6502 CPU registers
-//uint16_t pc;
-//uint8_t sp, a, x, y, status;
-
-
-//helper variables
-//uint32_t instructions = 0; //keep track of total instructions executed
-//uint32_t clockticks6502 = 0, clockgoal6502 = 0;
-//uint16_t oldpc, ea, reladdr, value, result;
-//uint8_t opcode, oldstatus;
-
-//externally supplied functions
-//extern uint8_t read6502(uint16_t address);
-//extern void write6502(uint16_t address, uint8_t value);
-
-//a few general functions used by various other functions
-//void push16(uint16_t pushval) {
-//    write6502(BASE_STACK + sp, (pushval >> 8) & 0xFF);
-//    write6502(BASE_STACK + ((sp - 1) & 0xFF), pushval & 0xFF);
-//    sp -= 2;
-//}
-
-//void push8(uint8_t pushval) {
-//    write6502(BASE_STACK + sp--, pushval);
-//}
-
-//uint16_t pull16() {
-//    uint16_t temp16;
-//    temp16 = read6502(BASE_STACK + ((sp + 1) & 0xFF)) | ((uint16_t)read6502(BASE_STACK + ((sp + 2) & 0xFF)) << 8);
-//    sp += 2;
-//    return(temp16);
-//}
-
-//uint8_t pull8() {
-//    return (read6502(BASE_STACK + ++sp));
-//}
-
-//void reset6502() {
-//    pc = (uint16_t)read6502(0xFFFC) | ((uint16_t)read6502(0xFFFD) << 8);
-//    a = 0;
-//    x = 0;
-//    y = 0;
-//    sp = 0xFD;
-//    status |= FLAG_CONSTANT;
-//}
 
 
 //static void (*addrtable[256])();
@@ -983,10 +1040,21 @@ const BASE_STACK: u16 = 0x100;
 //        callexternal = 1;
 //    } else callexternal = 0;
 //}
-//
-
-
 
 /* For testing purposes */
+struct DbgMem { }
+impl Memory for DbgMem {
+    fn read(&self, address: u16) -> u8 {
+        println!("READ: {} (returning 0)", address);
+        0
+    }
+    fn write(&mut self, address: u16, value: u8) {
+        println!("WRITE: Set address {} = {} (not actually writing)", address, value);
+    }
+}
 fn main() {
+    let mut tpu = CPU::new();
+    let mut dbgm = DbgMem { };
+    let our_val: u16 = 65535;
+    tpu.push16(&mut dbgm, our_val);
 }
