@@ -1006,28 +1006,48 @@ impl CPU {
     }
 
     //static void dec() {
+    fn inst_dec<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = value - 1;
+        self.value = self.getvalue(mem);
+        self.result = self.value - 1;
        
     //    zerocalc(result);
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_zero(r);
+        self.flagcalc_sign(r);
        
     //    putvalue(result);
+        self.putvalue(mem, r);
     //}
+    }
 
     //static void dex() {
+    fn inst_dex<T: Memory>(&mut self, _mem: &mut T) {
     //    x--;
+        self.x -= 1;
        
     //    zerocalc(x);
     //    signcalc(x);
+        let x = self.x as u16;
+        self.flagcalc_zero(x);
+        self.flagcalc_sign(x);
     //}
+    }
 
     //static void dey() {
+    fn inst_dey<T: Memory>(&mut self, _mem: &mut T) {
     //    y--;
+        self.y -= 1;
        
     //    zerocalc(y);
     //    signcalc(y);
+        let y = self.y as u16;
+        self.flagcalc_zero(y);
+        self.flagcalc_sign(y);
     //}
+    }
 
     //static void eor() {
     //    penaltyop = 1;
