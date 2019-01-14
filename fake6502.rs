@@ -894,18 +894,30 @@ impl CPU {
     //static void clc() {
     //    clearcarry();
     //}
+    fn inst_clc<T: Memory>(&mut self, _mem: &mut T) {
+        self.flagclear(FLAG_CARRY);
+    }
 
     //static void cld() {
     //    cleardecimal();
     //}
+    fn inst_cld<T: Memory>(&mut self, _mem: &mut T) {
+        self.flagclear(FLAG_DECIMAL);
+    }
 
     //static void cli() {
     //    clearinterrupt();
     //}
+    fn inst_cli<T: Memory>(&mut self, _mem: &mut T) {
+        self.flagclear(FLAG_INTERRUPT);
+    }
 
     //static void clv() {
     //    clearoverflow();
     //}
+    fn inst_clv<T: Memory>(&mut self, _mem: &mut T) {
+        self.flagclear(FLAG_OVERFLOW);
+    }
 
     //static void cmp() {
     //    penaltyop = 1;
