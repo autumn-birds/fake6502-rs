@@ -1050,90 +1050,172 @@ impl CPU {
     }
 
     //static void eor() {
+    fn inst_eor<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
+        self.penaltyop = 1;
     //    value = getvalue();
     //    result = (uint16_t)a ^ value;
+        self.value = self.getvalue(mem);
+        self.result = self.a as u16 ^ self.value;
        
     //    zerocalc(result);
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_zero(r);
+        self.flagcalc_sign(r);
        
     //    saveaccum(result);
+        self.save_accumulator(r);
     //}
+    }
 
     //static void inc() {
+    fn inst_inc<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = value + 1;
+        self.value = self.getvalue(mem);
+        self.result = self.value + 1;
        
     //    zerocalc(result);
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_zero(r);
+        self.flagcalc_sign(r);
        
     //    putvalue(result);
+        self.putvalue(mem, r);
     //}
+    }
 
     //static void inx() {
+    fn inst_inx<T: Memory>(&mut self, _mem: &mut T) {
     //    x++;
+        self.x += 1;
        
     //    zerocalc(x);
     //    signcalc(x);
+        let x = self.x as u16;
+        self.flagcalc_zero(x);
+        self.flagcalc_sign(x);
     //}
+    }
 
     //static void iny() {
+    fn inst_iny<T: Memory>(&mut self, _mem: &mut T) {
     //    y++;
+        self.y += 1;
        
     //    zerocalc(y);
     //    signcalc(y);
+        let y = self.y as u16;
+        self.flagcalc_zero(y);
+        self.flagcalc_sign(y);
     //}
+    }
 
     //static void jmp() {
+    fn inst_jmp<T: Memory>(&mut self, _mem: &mut T) {
     //    pc = ea;
+        self.pc = self.ea;
     //}
+    }
 
     //static void jsr() {
+    fn inst_jsr<T: Memory>(&mut self, mem: &mut T) {
     //    push16(pc - 1);
     //    pc = ea;
+        let pc = self.pc - 1;
+        self.push16(mem, pc);
+        self.pc = self.ea;
     //}
+    }
 
     //static void lda() {
+    fn inst_lda<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    a = (uint8_t)(value & 0x00FF);
+        self.penaltyop = 1;
+        self.value = self.getvalue(mem);
+        self.a = (self.value & 0x00FF) as u8;
        
     //    zerocalc(a);
     //    signcalc(a);
+        let a = self.a as u16;
+        self.flagcalc_zero(a);
+        self.flagcalc_sign(a);
     //}
+    }
 
     //static void ldx() {
+    fn inst_ldx<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    x = (uint8_t)(value & 0x00FF);
+        self.penaltyop = 1;
+        self.value = self.getvalue(mem);
+        self.x = (self.value & 0x00FF) as u8;
        
     //    zerocalc(x);
     //    signcalc(x);
+        let x = self.x as u16;
+        self.flagcalc_zero(x);
+        self.flagcalc_sign(x);
     //}
+    }
 
     //static void ldy() {
+    fn inst_ldy<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    y = (uint8_t)(value & 0x00FF);
+        self.penaltyop = 1;
+        self.value = self.getvalue(mem);
+        self.y = (self.value & 0x00FF) as u8;
        
     //    zerocalc(y);
     //    signcalc(y);
+        let y = self.y as u16;
+        self.flagcalc_zero(y);
+        self.flagcalc_sign(y);
     //}
+    }
 
     //static void lsr() {
+    fn inst_lsr<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = value >> 1;
+        self.value = self.getvalue(mem);
+        self.result = self.value >> 1;
        
     //    if (value & 1) setcarry();
     //        else clearcarry();
+        if self.value & 1 != 0 {
+            self.flagset(FLAG_CARRY);
+        } else {
+            self.flagclear(FLAG_CARRY);
+        }
+
     //    zerocalc(result);
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_zero(r);
+        self.flagcalc_sign(r);
        
     //    putvalue(result);
+        self.putvalue(mem, r);
     //}
+    }
 
     //static void nop() {
+    fn inst_nop<T: Memory>(&mut self, _mem: &mut T) {
     //    switch (opcode) {
+        match self.opcode {
+            0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
+                self.penaltyop = 1;
+            }
+            _ => {}
+        };
     //        case 0x1C:
     //        case 0x3C:
     //        case 0x5C:
@@ -1144,82 +1226,147 @@ impl CPU {
     //            break;
     //    }
     //}
+    }
 
     //static void ora() {
+    fn inst_ora<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    result = (uint16_t)a | value;
+        self.penaltyop = 1;
+        self.value = self.getvalue(mem);
+        self.result = self.a as u16 | self.value;
        
     //    zerocalc(result);
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_zero(r);
+        self.flagcalc_sign(r);
        
     //    saveaccum(result);
+        self.save_accumulator(r);
     //}
+    }
 
     //static void pha() {
+    fn inst_pha<T: Memory>(&mut self, mem: &mut T) {
     //    push8(a);
+        let a = self.a;
+        self.push8(mem, a);
     //}
+    }
 
     //static void php() {
+    fn inst_php<T: Memory>(&mut self, mem: &mut T) {
     //    push8(status | FLAG_BREAK);
+        let s = self.status | FLAG_BREAK;
+        self.push8(mem, s);
     //}
+    }
 
     //static void pla() {
+    fn inst_pla<T: Memory>(&mut self, mem: &mut T) {
     //    a = pull8();
+        self.a = self.pull8(mem);
        
     //    zerocalc(a);
     //    signcalc(a);
+        let a = self.a as u16;
+        self.flagcalc_zero(a);
+        self.flagcalc_sign(a);
     //}
+    }
 
     //static void plp() {
+    fn inst_plp<T: Memory>(&mut self, mem: &mut T) {
     //    status = pull8() | FLAG_CONSTANT;
+        self.status = self.pull8(mem) | FLAG_CONSTANT;
     //}
+    }
 
     //static void rol() {
+    fn inst_rol<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = (value << 1) | (status & FLAG_CARRY);
+        self.value = self.getvalue(mem);
+        self.result = (self.value << 1) | (self.status & FLAG_CARRY) as u16;
        
     //    carrycalc(result);
     //    zerocalc(result);
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_carry(r);
+        self.flagcalc_zero(r);
+        self.flagcalc_sign(r);
        
     //    putvalue(result);
+        self.putvalue(mem, r);
     //}
+    }
 
     //static void ror() {
+    fn inst_ror<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = (value >> 1) | ((status & FLAG_CARRY) << 7);
+        self.value = self.getvalue(mem);
        
     //    if (value & 1) setcarry();
     //        else clearcarry();
     //    zerocalc(result);
     //    signcalc(result);
+        if (self.value & 1) != 0 {
+            self.flagset(FLAG_CARRY);
+        } else {
+            self.flagclear(FLAG_CARRY);
+        }
        
     //    putvalue(result);
+        let r = self.result;
+        self.putvalue(mem, r);
     //}
+    }
 
     //static void rti() {
+    fn inst_rti<T: Memory>(&mut self, mem: &mut T) {
     //    status = pull8();
     //    value = pull16();
     //    pc = value;
+        self.status = self.pull8(mem);
+        self.value = self.pull16(mem);
+        self.pc = self.value;
     //}
+    }
 
     //static void rts() {
+    fn inst_rts<T: Memory>(&mut self, mem: &mut T) {
     //    value = pull16();
     //    pc = value + 1;
+        self.value = self.pull16(mem);
+        self.pc = self.value + 1;
     //}
+    }
 
     //static void sbc() {
+    fn inst_sbc<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue() ^ 0x00FF;
     //    result = (uint16_t)a + value + (uint16_t)(status & FLAG_CARRY);
+        self.penaltyop = 1;
+        self.value = self.getvalue(mem) ^ 0x00FF;
+        self.result = self.a as u16 + self.value + (self.status & FLAG_CARRY) as u16;
        
     //    carrycalc(result);
     //    zerocalc(result);
     //    overflowcalc(result, a, value);
     //    signcalc(result);
+        let (r, a, v) = (self.result, self.a, self.value);
+        self.flagcalc_carry(r);
+        self.flagcalc_zero(r);
+        self.flagcalc_overflow(r, a, v);
+        self.flagcalc_sign(r);
 
     //    #ifndef NES_CPU
+        if !NES_CPU {
     //    if (status & FLAG_DECIMAL) {
     //        clearcarry();
             
@@ -1233,74 +1380,148 @@ impl CPU {
     //        }
             
     //        clockticks6502++;
+            if (self.status & FLAG_DECIMAL) != 0 {
+                self.flagclear(FLAG_CARRY);
+
+                // TODO: This is definitely going to overflow sometimes, we should probably have
+                // figured out what to do earlier...
+                self.a -= 0x66;
+                if (self.a & 0x0F) > 0x09 {
+                    self.a += 0x06;
+                }
+                if (self.a & 0xF0) > 0x90 {
+                    self.a += 0x60;
+                    self.flagset(FLAG_CARRY);
+                }
+
+                self.clockticks += 1;
+            }
     //    }
     //    #endif
+        }
        
     //    saveaccum(result);
+        let r = self.result;
+        self.save_accumulator(r);
     //}
+    }
 
     //static void sec() {
+    fn inst_sec<T: Memory>(&mut self, _mem: &mut T) {
     //    setcarry();
+        self.flagset(FLAG_CARRY);
     //}
+    }
 
     //static void sed() {
+    fn inst_sed<T: Memory>(&mut self, _mem: &mut T) {
     //    setdecimal();
+        self.flagset(FLAG_DECIMAL);
     //}
+    }
 
     //static void sei() {
+    fn inst_sei<T: Memory>(&mut self, _mem: &mut T) {
     //    setinterrupt();
+        self.flagset(FLAG_INTERRUPT);
     //}
+    }
 
     //static void sta() {
+    fn inst_sta<T: Memory>(&mut self, mem: &mut T) {
     //    putvalue(a);
+        let a = self.a as u16;
+        self.putvalue(mem, a);
     //}
+    }
 
     //static void stx() {
+    fn inst_stx<T: Memory>(&mut self, mem: &mut T) {
     //    putvalue(x);
+        let x = self.x as u16;
+        self.putvalue(mem, x);
     //}
+    }
 
     //static void sty() {
+    fn inst_sty<T: Memory>(&mut self, mem: &mut T) {
     //    putvalue(y);
+        let y = self.y as u16;
+        self.putvalue(mem, y);
     //}
+    }
 
     //static void tax() {
+    fn inst_tax<T: Memory>(&mut self, _mem: &mut T) {
     //    x = a;
+        self.x = self.a;
        
     //    zerocalc(x);
     //    signcalc(x);
+        let x = self.x as u16;
+        self.flagcalc_zero(x);
+        self.flagcalc_sign(x);
     //}
+    }
 
     //static void tay() {
+    fn inst_tay<T: Memory>(&mut self, _mem: &mut T) {
     //    y = a;
+        self.y = self.a;
        
     //    zerocalc(y);
     //    signcalc(y);
+        let y = self.y as u16;
+        self.flagcalc_zero(y);
+        self.flagcalc_sign(y);
     //}
+    }
 
     //static void tsx() {
+    fn inst_tsy<T: Memory>(&mut self, _mem: &mut T) {
     //    x = sp;
+        self.x = self.sp;
        
     //    zerocalc(x);
     //    signcalc(x);
+        let x = self.x as u16;
+        self.flagcalc_zero(x);
+        self.flagcalc_sign(x);
     //}
+    }
 
     //static void txa() {
+    fn inst_txa<T: Memory>(&mut self, _mem: &mut T) {
     //    a = x;
+        self.a = self.x;
        
     //    zerocalc(a);
     //    signcalc(a);
+        let a = self.a as u16;
+        self.flagcalc_zero(a);
+        self.flagcalc_sign(a);
     //}
+    }
 
     //static void txs() {
+    fn inst_txs<T: Memory>(&mut self, _mem: &mut T) {
     //    sp = x;
+        self.sp = self.x;
     //}
+    }
 
     //static void tya() {
+    fn inst_tya<T: Memory>(&mut self, _mem: &mut T) {
     //    a = y;
+        self.a = self.y;
        
     //    zerocalc(a);
     //    signcalc(a);
+        let a = self.a as u16;
+        self.flagcalc_zero(a);
+        self.flagcalc_sign(a);
     //}
+    }
 
     //undocumented instructions
     //#ifdef UNDOCUMENTED
@@ -1521,4 +1742,5 @@ fn main() {
     let our_val: u16 = 65535;
     tpu.push16(&mut dbgm, our_val);
     assert!(tpu.pull16(&mut dbgm) == our_val);
+    tpu.inst_lda(&mut dbgm);
 }
