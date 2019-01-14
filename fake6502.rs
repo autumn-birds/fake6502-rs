@@ -1478,7 +1478,7 @@ impl CPU {
     }
 
     //static void tsx() {
-    fn inst_tsy<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_tsx<T: Memory>(&mut self, _mem: &mut T) {
     //    x = sp;
         self.x = self.sp;
        
@@ -1610,7 +1610,335 @@ impl CPU {
     //#endif
 
 
+    //void nmi6502() {
+    //    push16(pc);
+    //    push8(status);
+    //    status |= FLAG_INTERRUPT;
+    //    pc = (uint16_t)read6502(0xFFFA) | ((uint16_t)read6502(0xFFFB) << 8);
+    //}
 
+    //void irq6502() {
+    //    push16(pc);
+    //    push8(status);
+    //    status |= FLAG_INTERRUPT;
+    //    pc = (uint16_t)read6502(0xFFFE) | ((uint16_t)read6502(0xFFFF) << 8);
+    //}
+
+    //uint8_t callexternal = 0;
+    //void (*loopexternal)();
+
+    //void exec6502(uint32_t tickcount) {
+    fn exec<T: Memory>(&mut self, mem: &mut T, tickcount: u32) {
+    //    clockgoal6502 += tickcount;
+        self.clockgoal += tickcount;
+
+    //    while (clockticks6502 < clockgoal6502) {
+        while self.clockticks < self.clockgoal {
+    //        opcode = read6502(pc++);
+    //        status |= FLAG_CONSTANT;
+            self.opcode = mem.read(self.pc);
+            self.pc += 1;
+            self.flagset(FLAG_CONSTANT);
+
+    //        penaltyop = 0;
+    //        penaltyaddr = 0;
+            self.penaltyop = 0;
+            self.penaltyaddr = 0;
+            self.addr_acc = false;
+
+    //        (*addrtable[opcode])();
+    //        (*optable[opcode])();
+    //        clockticks6502 += ticktable[opcode];
+    //        if (penaltyop && penaltyaddr) clockticks6502++;
+            self.clockticks += self.run_one_op(mem);
+            if self.penaltyop != 0 && self.penaltyaddr != 0 {
+                self.clockticks += 1;
+            }
+
+    //        instructions++;
+            // TODO: If anything needed to watch out for overflows, it's this.
+            self.instructions_ran += 1;
+
+            // TODO: Figure out how a callback works. Maybe an Option<fn>?
+    //        if (callexternal) (*loopexternal)();
+    //    }
+    //}
+        }
+    }
+
+    fn run_one_op<T: Memory>(&mut self, mem: &mut T) -> u32 {
+        // Okay, so I decided to convert the tables of function pointers in the original into a
+        // giant match statement after seeing a comment that stated LLVM would be able to optimize
+        // said match statement into a jump table anyway, but unfortunately this means that we do
+        // have a really tremendous match statement here. Try to think of it like a section of data
+        // and you might feel better.
+        //
+        // (If you're changing code, please don't deviate from the pattern set out here at all.
+        // Ideally, make sure the change agrees with the data in the json... I know, it's a hacky
+        // system...)
+
+        // We return the number of cycles running the instruction took (rather than looking it up
+        // anywhere.)
+        return match self.opcode {
+            0   => { self.addr_implied(mem);           self.inst_brk(mem);   7 },
+            1   => { self.addr_indirect_x(mem);        self.inst_ora(mem);   6 },
+            2   => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            3   => { self.addr_indirect_x(mem);        self.inst_slo(mem);   8 },
+            4   => { self.addr_zeropage(mem);          self.inst_nop(mem);   3 },
+            5   => { self.addr_zeropage(mem);          self.inst_ora(mem);   3 },
+            6   => { self.addr_zeropage(mem);          self.inst_asl(mem);   5 },
+            7   => { self.addr_zeropage(mem);          self.inst_slo(mem);   5 },
+            8   => { self.addr_implied(mem);           self.inst_php(mem);   3 },
+            9   => { self.addr_immediate(mem);         self.inst_ora(mem);   2 },
+            10  => { self.addr_accumulator(mem);       self.inst_asl(mem);   2 },
+            11  => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            12  => { self.addr_absolute(mem);          self.inst_nop(mem);   4 },
+            13  => { self.addr_absolute(mem);          self.inst_ora(mem);   4 },
+            14  => { self.addr_absolute(mem);          self.inst_asl(mem);   6 },
+            15  => { self.addr_absolute(mem);          self.inst_slo(mem);   6 },
+            16  => { self.addr_relative_branch(mem);   self.inst_bpl(mem);   2 },
+            17  => { self.addr_indirect_y(mem);        self.inst_ora(mem);   5 },
+            18  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            19  => { self.addr_indirect_y(mem);        self.inst_slo(mem);   8 },
+            20  => { self.addr_zeropage_x(mem);        self.inst_nop(mem);   4 },
+            21  => { self.addr_zeropage_x(mem);        self.inst_ora(mem);   4 },
+            22  => { self.addr_zeropage_x(mem);        self.inst_asl(mem);   6 },
+            23  => { self.addr_zeropage_x(mem);        self.inst_slo(mem);   6 },
+            24  => { self.addr_implied(mem);           self.inst_clc(mem);   2 },
+            25  => { self.addr_absolute_y(mem);        self.inst_ora(mem);   4 },
+            26  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            27  => { self.addr_absolute_y(mem);        self.inst_slo(mem);   7 },
+            28  => { self.addr_absolute_x(mem);        self.inst_nop(mem);   4 },
+            29  => { self.addr_absolute_x(mem);        self.inst_ora(mem);   4 },
+            30  => { self.addr_absolute_x(mem);        self.inst_asl(mem);   7 },
+            31  => { self.addr_absolute_x(mem);        self.inst_slo(mem);   7 },
+            32  => { self.addr_absolute(mem);          self.inst_jsr(mem);   6 },
+            33  => { self.addr_indirect_x(mem);        self.inst_and(mem);   6 },
+            34  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            35  => { self.addr_indirect_x(mem);        self.inst_rla(mem);   8 },
+            36  => { self.addr_zeropage(mem);          self.inst_bit(mem);   3 },
+            37  => { self.addr_zeropage(mem);          self.inst_and(mem);   3 },
+            38  => { self.addr_zeropage(mem);          self.inst_rol(mem);   5 },
+            39  => { self.addr_zeropage(mem);          self.inst_rla(mem);   5 },
+            40  => { self.addr_implied(mem);           self.inst_plp(mem);   4 },
+            41  => { self.addr_immediate(mem);         self.inst_and(mem);   2 },
+            42  => { self.addr_accumulator(mem);       self.inst_rol(mem);   2 },
+            43  => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            44  => { self.addr_absolute(mem);          self.inst_bit(mem);   4 },
+            45  => { self.addr_absolute(mem);          self.inst_and(mem);   4 },
+            46  => { self.addr_absolute(mem);          self.inst_rol(mem);   6 },
+            47  => { self.addr_absolute(mem);          self.inst_rla(mem);   6 },
+            48  => { self.addr_relative_branch(mem);   self.inst_bmi(mem);   2 },
+            49  => { self.addr_indirect_y(mem);        self.inst_and(mem);   5 },
+            50  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            51  => { self.addr_indirect_y(mem);        self.inst_rla(mem);   8 },
+            52  => { self.addr_zeropage_x(mem);        self.inst_nop(mem);   4 },
+            53  => { self.addr_zeropage_x(mem);        self.inst_and(mem);   4 },
+            54  => { self.addr_zeropage_x(mem);        self.inst_rol(mem);   6 },
+            55  => { self.addr_zeropage_x(mem);        self.inst_rla(mem);   6 },
+            56  => { self.addr_implied(mem);           self.inst_sec(mem);   2 },
+            57  => { self.addr_absolute_y(mem);        self.inst_and(mem);   4 },
+            58  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            59  => { self.addr_absolute_y(mem);        self.inst_rla(mem);   7 },
+            60  => { self.addr_absolute_x(mem);        self.inst_nop(mem);   4 },
+            61  => { self.addr_absolute_x(mem);        self.inst_and(mem);   4 },
+            62  => { self.addr_absolute_x(mem);        self.inst_rol(mem);   7 },
+            63  => { self.addr_absolute_x(mem);        self.inst_rla(mem);   7 },
+            64  => { self.addr_implied(mem);           self.inst_rti(mem);   6 },
+            65  => { self.addr_indirect_x(mem);        self.inst_eor(mem);   6 },
+            66  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            67  => { self.addr_indirect_x(mem);        self.inst_sre(mem);   8 },
+            68  => { self.addr_zeropage(mem);          self.inst_nop(mem);   3 },
+            69  => { self.addr_zeropage(mem);          self.inst_eor(mem);   3 },
+            70  => { self.addr_zeropage(mem);          self.inst_lsr(mem);   5 },
+            71  => { self.addr_zeropage(mem);          self.inst_sre(mem);   5 },
+            72  => { self.addr_implied(mem);           self.inst_pha(mem);   3 },
+            73  => { self.addr_immediate(mem);         self.inst_eor(mem);   2 },
+            74  => { self.addr_accumulator(mem);       self.inst_lsr(mem);   2 },
+            75  => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            76  => { self.addr_absolute(mem);          self.inst_jmp(mem);   3 },
+            77  => { self.addr_absolute(mem);          self.inst_eor(mem);   4 },
+            78  => { self.addr_absolute(mem);          self.inst_lsr(mem);   6 },
+            79  => { self.addr_absolute(mem);          self.inst_sre(mem);   6 },
+            80  => { self.addr_relative_branch(mem);   self.inst_bvc(mem);   2 },
+            81  => { self.addr_indirect_y(mem);        self.inst_eor(mem);   5 },
+            82  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            83  => { self.addr_indirect_y(mem);        self.inst_sre(mem);   8 },
+            84  => { self.addr_zeropage_x(mem);        self.inst_nop(mem);   4 },
+            85  => { self.addr_zeropage_x(mem);        self.inst_eor(mem);   4 },
+            86  => { self.addr_zeropage_x(mem);        self.inst_lsr(mem);   6 },
+            87  => { self.addr_zeropage_x(mem);        self.inst_sre(mem);   6 },
+            88  => { self.addr_implied(mem);           self.inst_cli(mem);   2 },
+            89  => { self.addr_absolute_y(mem);        self.inst_eor(mem);   4 },
+            90  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            91  => { self.addr_absolute_y(mem);        self.inst_sre(mem);   7 },
+            92  => { self.addr_absolute_x(mem);        self.inst_nop(mem);   4 },
+            93  => { self.addr_absolute_x(mem);        self.inst_eor(mem);   4 },
+            94  => { self.addr_absolute_x(mem);        self.inst_lsr(mem);   7 },
+            95  => { self.addr_absolute_x(mem);        self.inst_sre(mem);   7 },
+            96  => { self.addr_implied(mem);           self.inst_rts(mem);   6 },
+            97  => { self.addr_indirect_x(mem);        self.inst_adc(mem);   6 },
+            98  => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            99  => { self.addr_indirect_x(mem);        self.inst_rra(mem);   8 },
+            100 => { self.addr_zeropage(mem);          self.inst_nop(mem);   3 },
+            101 => { self.addr_zeropage(mem);          self.inst_adc(mem);   3 },
+            102 => { self.addr_zeropage(mem);          self.inst_ror(mem);   5 },
+            103 => { self.addr_zeropage(mem);          self.inst_rra(mem);   5 },
+            104 => { self.addr_implied(mem);           self.inst_pla(mem);   4 },
+            105 => { self.addr_immediate(mem);         self.inst_adc(mem);   2 },
+            106 => { self.addr_accumulator(mem);       self.inst_ror(mem);   2 },
+            107 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            108 => { self.addr_indirect(mem);          self.inst_jmp(mem);   5 },
+            109 => { self.addr_absolute(mem);          self.inst_adc(mem);   4 },
+            110 => { self.addr_absolute(mem);          self.inst_ror(mem);   6 },
+            111 => { self.addr_absolute(mem);          self.inst_rra(mem);   6 },
+            112 => { self.addr_relative_branch(mem);   self.inst_bvs(mem);   2 },
+            113 => { self.addr_indirect_y(mem);        self.inst_adc(mem);   5 },
+            114 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            115 => { self.addr_indirect_y(mem);        self.inst_rra(mem);   8 },
+            116 => { self.addr_zeropage_x(mem);        self.inst_nop(mem);   4 },
+            117 => { self.addr_zeropage_x(mem);        self.inst_adc(mem);   4 },
+            118 => { self.addr_zeropage_x(mem);        self.inst_ror(mem);   6 },
+            119 => { self.addr_zeropage_x(mem);        self.inst_rra(mem);   6 },
+            120 => { self.addr_implied(mem);           self.inst_sei(mem);   2 },
+            121 => { self.addr_absolute_y(mem);        self.inst_adc(mem);   4 },
+            122 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            123 => { self.addr_absolute_y(mem);        self.inst_rra(mem);   7 },
+            124 => { self.addr_absolute_x(mem);        self.inst_nop(mem);   4 },
+            125 => { self.addr_absolute_x(mem);        self.inst_adc(mem);   4 },
+            126 => { self.addr_absolute_x(mem);        self.inst_ror(mem);   7 },
+            127 => { self.addr_absolute_x(mem);        self.inst_rra(mem);   7 },
+            128 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            129 => { self.addr_indirect_x(mem);        self.inst_sta(mem);   6 },
+            130 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            131 => { self.addr_indirect_x(mem);        self.inst_sax(mem);   6 },
+            132 => { self.addr_zeropage(mem);          self.inst_sty(mem);   3 },
+            133 => { self.addr_zeropage(mem);          self.inst_sta(mem);   3 },
+            134 => { self.addr_zeropage(mem);          self.inst_stx(mem);   3 },
+            135 => { self.addr_zeropage(mem);          self.inst_sax(mem);   3 },
+            136 => { self.addr_implied(mem);           self.inst_dey(mem);   2 },
+            137 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            138 => { self.addr_implied(mem);           self.inst_txa(mem);   2 },
+            139 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            140 => { self.addr_absolute(mem);          self.inst_sty(mem);   4 },
+            141 => { self.addr_absolute(mem);          self.inst_sta(mem);   4 },
+            142 => { self.addr_absolute(mem);          self.inst_stx(mem);   4 },
+            143 => { self.addr_absolute(mem);          self.inst_sax(mem);   4 },
+            144 => { self.addr_relative_branch(mem);   self.inst_bcc(mem);   2 },
+            145 => { self.addr_indirect_y(mem);        self.inst_sta(mem);   6 },
+            146 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            147 => { self.addr_indirect_y(mem);        self.inst_nop(mem);   6 },
+            148 => { self.addr_zeropage_x(mem);        self.inst_sty(mem);   4 },
+            149 => { self.addr_zeropage_x(mem);        self.inst_sta(mem);   4 },
+            150 => { self.addr_zeropage_y(mem);        self.inst_stx(mem);   4 },
+            151 => { self.addr_zeropage_y(mem);        self.inst_sax(mem);   4 },
+            152 => { self.addr_implied(mem);           self.inst_tya(mem);   2 },
+            153 => { self.addr_absolute_y(mem);        self.inst_sta(mem);   5 },
+            154 => { self.addr_implied(mem);           self.inst_txs(mem);   2 },
+            155 => { self.addr_absolute_y(mem);        self.inst_nop(mem);   5 },
+            156 => { self.addr_absolute_x(mem);        self.inst_nop(mem);   5 },
+            157 => { self.addr_absolute_x(mem);        self.inst_sta(mem);   5 },
+            158 => { self.addr_absolute_y(mem);        self.inst_nop(mem);   5 },
+            159 => { self.addr_absolute_y(mem);        self.inst_nop(mem);   5 },
+            160 => { self.addr_immediate(mem);         self.inst_ldy(mem);   2 },
+            161 => { self.addr_indirect_x(mem);        self.inst_lda(mem);   6 },
+            162 => { self.addr_immediate(mem);         self.inst_ldx(mem);   2 },
+            163 => { self.addr_indirect_x(mem);        self.inst_lax(mem);   6 },
+            164 => { self.addr_zeropage(mem);          self.inst_ldy(mem);   3 },
+            165 => { self.addr_zeropage(mem);          self.inst_lda(mem);   3 },
+            166 => { self.addr_zeropage(mem);          self.inst_ldx(mem);   3 },
+            167 => { self.addr_zeropage(mem);          self.inst_lax(mem);   3 },
+            168 => { self.addr_implied(mem);           self.inst_tay(mem);   2 },
+            169 => { self.addr_immediate(mem);         self.inst_lda(mem);   2 },
+            170 => { self.addr_implied(mem);           self.inst_tax(mem);   2 },
+            171 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            172 => { self.addr_absolute(mem);          self.inst_ldy(mem);   4 },
+            173 => { self.addr_absolute(mem);          self.inst_lda(mem);   4 },
+            174 => { self.addr_absolute(mem);          self.inst_ldx(mem);   4 },
+            175 => { self.addr_absolute(mem);          self.inst_lax(mem);   4 },
+            176 => { self.addr_relative_branch(mem);   self.inst_bcs(mem);   2 },
+            177 => { self.addr_indirect_y(mem);        self.inst_lda(mem);   5 },
+            178 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            179 => { self.addr_indirect_y(mem);        self.inst_lax(mem);   5 },
+            180 => { self.addr_zeropage_x(mem);        self.inst_ldy(mem);   4 },
+            181 => { self.addr_zeropage_x(mem);        self.inst_lda(mem);   4 },
+            182 => { self.addr_zeropage_y(mem);        self.inst_ldx(mem);   4 },
+            183 => { self.addr_zeropage_y(mem);        self.inst_lax(mem);   4 },
+            184 => { self.addr_implied(mem);           self.inst_clv(mem);   2 },
+            185 => { self.addr_absolute_y(mem);        self.inst_lda(mem);   4 },
+            186 => { self.addr_implied(mem);           self.inst_tsx(mem);   2 },
+            187 => { self.addr_absolute_y(mem);        self.inst_lax(mem);   4 },
+            188 => { self.addr_absolute_x(mem);        self.inst_ldy(mem);   4 },
+            189 => { self.addr_absolute_x(mem);        self.inst_lda(mem);   4 },
+            190 => { self.addr_absolute_y(mem);        self.inst_ldx(mem);   4 },
+            191 => { self.addr_absolute_y(mem);        self.inst_lax(mem);   4 },
+            192 => { self.addr_immediate(mem);         self.inst_cpy(mem);   2 },
+            193 => { self.addr_indirect_x(mem);        self.inst_cmp(mem);   6 },
+            194 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            195 => { self.addr_indirect_x(mem);        self.inst_dcp(mem);   8 },
+            196 => { self.addr_zeropage(mem);          self.inst_cpy(mem);   3 },
+            197 => { self.addr_zeropage(mem);          self.inst_cmp(mem);   3 },
+            198 => { self.addr_zeropage(mem);          self.inst_dec(mem);   5 },
+            199 => { self.addr_zeropage(mem);          self.inst_dcp(mem);   5 },
+            200 => { self.addr_implied(mem);           self.inst_iny(mem);   2 },
+            201 => { self.addr_immediate(mem);         self.inst_cmp(mem);   2 },
+            202 => { self.addr_implied(mem);           self.inst_dex(mem);   2 },
+            203 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            204 => { self.addr_absolute(mem);          self.inst_cpy(mem);   4 },
+            205 => { self.addr_absolute(mem);          self.inst_cmp(mem);   4 },
+            206 => { self.addr_absolute(mem);          self.inst_dec(mem);   6 },
+            207 => { self.addr_absolute(mem);          self.inst_dcp(mem);   6 },
+            208 => { self.addr_relative_branch(mem);   self.inst_bne(mem);   2 },
+            209 => { self.addr_indirect_y(mem);        self.inst_cmp(mem);   5 },
+            210 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            211 => { self.addr_indirect_y(mem);        self.inst_dcp(mem);   8 },
+            212 => { self.addr_zeropage_x(mem);        self.inst_nop(mem);   4 },
+            213 => { self.addr_zeropage_x(mem);        self.inst_cmp(mem);   4 },
+            214 => { self.addr_zeropage_x(mem);        self.inst_dec(mem);   6 },
+            215 => { self.addr_zeropage_x(mem);        self.inst_dcp(mem);   6 },
+            216 => { self.addr_implied(mem);           self.inst_cld(mem);   2 },
+            217 => { self.addr_absolute_y(mem);        self.inst_cmp(mem);   4 },
+            218 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            219 => { self.addr_absolute_y(mem);        self.inst_dcp(mem);   7 },
+            220 => { self.addr_absolute_x(mem);        self.inst_nop(mem);   4 },
+            221 => { self.addr_absolute_x(mem);        self.inst_cmp(mem);   4 },
+            222 => { self.addr_absolute_x(mem);        self.inst_dec(mem);   7 },
+            223 => { self.addr_absolute_x(mem);        self.inst_dcp(mem);   7 },
+            224 => { self.addr_immediate(mem);         self.inst_cpx(mem);   2 },
+            225 => { self.addr_indirect_x(mem);        self.inst_sbc(mem);   6 },
+            226 => { self.addr_immediate(mem);         self.inst_nop(mem);   2 },
+            227 => { self.addr_indirect_x(mem);        self.inst_isb(mem);   8 },
+            228 => { self.addr_zeropage(mem);          self.inst_cpx(mem);   3 },
+            229 => { self.addr_zeropage(mem);          self.inst_sbc(mem);   3 },
+            230 => { self.addr_zeropage(mem);          self.inst_inc(mem);   5 },
+            231 => { self.addr_zeropage(mem);          self.inst_isb(mem);   5 },
+            232 => { self.addr_implied(mem);           self.inst_inx(mem);   2 },
+            233 => { self.addr_immediate(mem);         self.inst_sbc(mem);   2 },
+            234 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            235 => { self.addr_immediate(mem);         self.inst_sbc(mem);   2 },
+            236 => { self.addr_absolute(mem);          self.inst_cpx(mem);   4 },
+            237 => { self.addr_absolute(mem);          self.inst_sbc(mem);   4 },
+            238 => { self.addr_absolute(mem);          self.inst_inc(mem);   6 },
+            239 => { self.addr_absolute(mem);          self.inst_isb(mem);   6 },
+            240 => { self.addr_relative_branch(mem);   self.inst_beq(mem);   2 },
+            241 => { self.addr_indirect_y(mem);        self.inst_sbc(mem);   5 },
+            242 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            243 => { self.addr_indirect_y(mem);        self.inst_isb(mem);   8 },
+            244 => { self.addr_zeropage_x(mem);        self.inst_nop(mem);   4 },
+            245 => { self.addr_zeropage_x(mem);        self.inst_sbc(mem);   4 },
+            246 => { self.addr_zeropage_x(mem);        self.inst_inc(mem);   6 },
+            247 => { self.addr_zeropage_x(mem);        self.inst_isb(mem);   6 },
+            248 => { self.addr_implied(mem);           self.inst_sed(mem);   2 },
+            249 => { self.addr_absolute_y(mem);        self.inst_sbc(mem);   4 },
+            250 => { self.addr_implied(mem);           self.inst_nop(mem);   2 },
+            251 => { self.addr_absolute_y(mem);        self.inst_isb(mem);   7 },
+            252 => { self.addr_absolute_x(mem);        self.inst_nop(mem);   4 },
+            253 => { self.addr_absolute_x(mem);        self.inst_sbc(mem);   4 },
+            254 => { self.addr_absolute_x(mem);        self.inst_inc(mem);   7 },
+            255 => { self.addr_absolute_x(mem);        self.inst_isb(mem);   7 },
+            _   => { panic!("unimplemented/impossible instruction");           },
+        }
+    }
 }
 
 
@@ -1682,46 +2010,6 @@ impl CPU {
 //};
 
 
-//void nmi6502() {
-//    push16(pc);
-//    push8(status);
-//    status |= FLAG_INTERRUPT;
-//    pc = (uint16_t)read6502(0xFFFA) | ((uint16_t)read6502(0xFFFB) << 8);
-//}
-
-//void irq6502() {
-//    push16(pc);
-//    push8(status);
-//    status |= FLAG_INTERRUPT;
-//    pc = (uint16_t)read6502(0xFFFE) | ((uint16_t)read6502(0xFFFF) << 8);
-//}
-
-//uint8_t callexternal = 0;
-//void (*loopexternal)();
-
-//void exec6502(uint32_t tickcount) {
-//    clockgoal6502 += tickcount;
-   
-//    while (clockticks6502 < clockgoal6502) {
-//        opcode = read6502(pc++);
-//        status |= FLAG_CONSTANT;
-
-//        penaltyop = 0;
-//        penaltyaddr = 0;
-
-// TODO: When we get to this part, make certain to set self.addr_acc to false, otherwise there will
-// be some strange behavior that takes place.
-//        (*addrtable[opcode])();
-//        (*optable[opcode])();
-//        clockticks6502 += ticktable[opcode];
-//        if (penaltyop && penaltyaddr) clockticks6502++;
-
-//        instructions++;
-
-//        if (callexternal) (*loopexternal)();
-//    }
-
-//}
 
 //void step6502() {
 //    opcode = read6502(pc++);

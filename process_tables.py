@@ -40,10 +40,15 @@ mode_rustfns = {
     'zpx': 'addr_zeropage_x'
 }
 
+width_ops = max(map(lambda x: len("inst_%s(mem);" % x), ops)) + 2
+width_modes = max(map(lambda x: len(mode_rustfns[x] + "(mem);"), modes)) + 2
+
+def padded(targ_width, value):
+    return value + ' '*(targ_width-len(value))
 
 for i in range(0, 256):
-    op = "inst_%s()" % ops[i]
-    mode = mode_rustfns[modes[i]] + "()"
+    op = "inst_%s(mem);" % ops[i]
+    mode = mode_rustfns[modes[i]] + "(mem);"
     cycles = ticks[i]
-    print("%d => { %s; %s; self.clockticks += %s; }," % (i, mode, op, cycles))
+    print("%d => { self.%s self.%s %s }," % (i, padded(width_modes, mode), padded(width_ops, op), cycles))
 
