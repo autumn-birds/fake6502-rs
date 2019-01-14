@@ -166,6 +166,11 @@ struct CPU {
     instructions_ran: u32,
     clockticks: u32,
     clockgoal: u32,
+    // This variable is here because some C code tests whether the current addressing mode is 'acc'
+    // (accumulator) by checking against the function lookup tables the C version of this emulator
+    // used. Since I opted to turn those into a match in the Rust version, I needed a different way
+    // to implement the same conditional.
+    addr_acc: bool,
     // Some of these are probably not needed in the struct, but for a direct port, it's easiest,
     // perhaps, to start out not trying to reason about whether a variable's state being carried
     // over between calls will matter.
@@ -205,7 +210,7 @@ impl CPU {
     // CPU struct to own its memory.
 
     fn new() -> CPU {
-        CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, penaltyaddr: 0, penaltyop: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 }
+        CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, addr_acc: false, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, penaltyaddr: 0, penaltyop: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 }
     }
 
     // TODO: Figure out how to deal with the overflow problem. In C, it would have wrapped around,
@@ -282,33 +287,6 @@ impl CPU {
         self.status |= FLAG_CONSTANT;
     }
 
-    //flag modifier macros
-    //#define setcarry() status |= FLAG_CARRY
-    //#define clearcarry() status &= (~FLAG_CARRY)
-    //#define setzero() status |= FLAG_ZERO
-    //#define clearzero() status &= (~FLAG_ZERO)
-    //#define setinterrupt() status |= FLAG_INTERRUPT
-    //#define clearinterrupt() status &= (~FLAG_INTERRUPT)
-    //#define setdecimal() status |= FLAG_DECIMAL
-    //#define cleardecimal() status &= (~FLAG_DECIMAL)
-    //#define setoverflow() status |= FLAG_OVERFLOW
-    //#define clearoverflow() status &= (~FLAG_OVERFLOW)
-    //#define setsign() status |= FLAG_SIGN
-    //#define clearsign() status &= (~FLAG_SIGN)
-
-    // This *seems* less efficient since they're actual functions. But I'm hoping the compiler is
-    // scary-smart and might just realise it might not need an actual function call and return for
-    // these, or whatever other optimization tricks it has up its sleeve. Maybe calling them on
-    // const values also helps? I dunno.
-    //
-    // We could just write it out by hand every time. But these probably don't cost *too* much.
-    fn flagset<T: Memory>(&mut self, flag: u8) {
-        self.status |= flag;
-    }
-
-    fn flagclear<T: Memory>(&mut self, flag: u8) {
-        self.status &= !flag;
-    }
 
     //addressing mode functions, calculates effective addresses
     //static void imp() { //implied
@@ -319,6 +297,7 @@ impl CPU {
     //static void acc() { //accumulator
     //}
     fn addr_accumulator<T: Memory>(&mut self, _mem: &T) {
+        self.addr_acc = true;
     }
 
     //static void imm() { //immediate
@@ -488,29 +467,155 @@ impl CPU {
     //    if (addrtable[opcode] == acc) return((uint16_t)a);
     //        else return((uint16_t)read6502(ea));
     //}
+    fn getvalue<T: Memory>(&mut self, mem: &T) -> u16 {
+        // But why is it u16...?
+        if self.addr_acc {
+            self.a as u16
+        } else {
+            mem.read(self.ea) as u16
+        }
+    }
 
     //static uint16_t getvalue16() {
     //    return((uint16_t)read6502(ea) | ((uint16_t)read6502(ea+1) << 8));
     //}
+    fn getvalue_16<T: Memory>(&mut self, mem: &T) -> u16 {
+        mem.read(self.ea) as u16 | ((mem.read(self.ea + 1) as u16) << 8)
+    }
 
     //static void putvalue(uint16_t saveval) {
     //    if (addrtable[opcode] == acc) a = (uint8_t)(saveval & 0x00FF);
     //        else write6502(ea, (saveval & 0x00FF));
     //}
+    fn putvalue<T: Memory>(&mut self, mem: &mut T, saveval: u16) {
+        if self.addr_acc {
+            self.a = (saveval & 0x00FF) as u8;
+        } else {
+            mem.write(self.ea, (saveval & 0x00FF) as u8);
+        }
+    }
+
+
+    //flag modifier macros
+    //#define setcarry() status |= FLAG_CARRY
+    //#define clearcarry() status &= (~FLAG_CARRY)
+    //#define setzero() status |= FLAG_ZERO
+    //#define clearzero() status &= (~FLAG_ZERO)
+    //#define setinterrupt() status |= FLAG_INTERRUPT
+    //#define clearinterrupt() status &= (~FLAG_INTERRUPT)
+    //#define setdecimal() status |= FLAG_DECIMAL
+    //#define cleardecimal() status &= (~FLAG_DECIMAL)
+    //#define setoverflow() status |= FLAG_OVERFLOW
+    //#define clearoverflow() status &= (~FLAG_OVERFLOW)
+    //#define setsign() status |= FLAG_SIGN
+    //#define clearsign() status &= (~FLAG_SIGN)
+
+    // This *seems* less efficient since they're actual functions. But I'm hoping the compiler is
+    // scary-smart and might just realise it might not need an actual function call and return for
+    // these, or whatever other optimization tricks it has up its sleeve. Maybe calling them on
+    // const values also helps? I dunno.
+    //
+    // We could just write it out by hand every time. But these probably don't cost *too* much.
+    fn flagset(&mut self, flag: u8) {
+        self.status |= flag;
+    }
+
+    fn flagclear(&mut self, flag: u8) {
+        self.status &= !flag;
+    }
+
+
+    //flag calculation macros
+    //#define zerocalc(n) {\
+    //    if ((n) & 0x00FF) clearzero();\
+    //        else setzero();\
+    //}
+
+    //#define signcalc(n) {\
+    //    if ((n) & 0x0080) setsign();\
+    //        else clearsign();\
+    //}
+
+    //#define carrycalc(n) {\
+    //    if ((n) & 0xFF00) setcarry();\
+    //        else clearcarry();\
+    //}
+
+    //#define overflowcalc(n, m, o) { /* n = result, m = accumulator, o = memory */ \
+    //    if (((n) ^ (uint16_t)(m)) & ((n) ^ (o)) & 0x0080) setoverflow();\
+    //        else clearoverflow();\
+    //}
+
+    // These functions help with setting CPU flags to an appropriate value based on the result of
+    // an operation. (For example, setting the overflow flag appropriately after some arithmetic is
+    // done.) They were originally macros, but functions will probably work just as well.
+    fn flagcalc_zero(&mut self, n: u16) {
+        if (n & 0x00FF) != 0 {
+            self.flagclear(FLAG_ZERO);
+        } else {
+            self.flagset(FLAG_ZERO);
+        }
+    }
+
+    fn flagcalc_sign(&mut self, n: u16) {
+        if (n & 0x0080) != 0 {
+            self.flagset(FLAG_SIGN);
+        } else {
+            self.flagclear(FLAG_SIGN);
+        }
+    }
+
+    fn flagcalc_carry(&mut self, n: u16) {
+        if (n & 0xFF00) != 0 {
+            self.flagset(FLAG_CARRY);
+        } else {
+            self.flagclear(FLAG_CARRY);
+        }
+    }
+
+    fn flagcalc_overflow(&mut self, n: u16, m: u8, o: u16) {
+        // (The ^ is not exponentiation but bitwise XOR. Most people probably know this.)
+        if (n ^ (m as u16)) & ((n ^ o) & 0x0080) != 0 {
+            self.flagset(FLAG_OVERFLOW);
+        } else {
+            self.flagclear(FLAG_OVERFLOW);
+        }
+    }
+
+    //#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
+    fn save_accumulator(&mut self, n: u16) {
+        self.a = (n & 0x00FF) as u8;
+    }
 
 
     //instruction handler functions
     //static void adc() {
+    fn inst_adc<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
+        self.penaltyop = 1;
     //    value = getvalue();
+        self.value = self.getvalue(mem);
     //    result = (uint16_t)a + value + (uint16_t)(status & FLAG_CARRY);
-       
+        self.result = self.a as u16 + self.value + (self.status & FLAG_CARRY) as u16;
     //    carrycalc(result);
     //    zerocalc(result);
     //    overflowcalc(result, a, value);
     //    signcalc(result);
+        // I copy these into variables because otherwise the borrow checker complains that I'm
+        // trying to use a value (e.g., self.result) I've already borrowed (by calling, e.g.,
+        // self.flagcalc_carry). It feels like there ought to be a less dumb way to do it, but for
+        // now this at least compiles...
+        let (r, a, v) = (self.result, self.a, self.value);
+        self.flagcalc_carry(r);
+        self.flagcalc_zero(r);
+        self.flagcalc_overflow(r, a, v);
+        self.flagcalc_sign(r);
         
+        // I don't *really* want an actual if statement to be compiled here but I decided to
+        // continue in the optimistic assumption that the Rust compiler and/or LLVM will notice
+        // it's a const value and optimize it away.
     //    #ifndef NES_CPU
+        if !NES_CPU {
     //    if (status & FLAG_DECIMAL) {
     //        clearcarry();
             
@@ -525,9 +630,25 @@ impl CPU {
     //        clockticks6502++;
     //    }
     //    #endif
+            if self.status & FLAG_DECIMAL != 0 {
+                self.flagclear(FLAG_CARRY);
+
+                if (self.a & 0x0F) > 0x09 {
+                    self.a += 0x06;
+                }
+                if (self.a & 0xF0) > 0x90 {
+                    self.a += 0x60;
+                    self.flagset(FLAG_CARRY);
+                }
+
+                self.clockticks += 1;
+            }
+        }
        
     //    saveaccum(result);
     //}
+        self.save_accumulator(result);
+    }
 
     //static void and() {
     //    penaltyop = 1;
@@ -1030,29 +1151,7 @@ impl CPU {
 
 }
 
-//#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
 
-
-//flag calculation macros
-//#define zerocalc(n) {\
-//    if ((n) & 0x00FF) clearzero();\
-//        else setzero();\
-//}
-
-//#define signcalc(n) {\
-//    if ((n) & 0x0080) setsign();\
-//        else clearsign();\
-//}
-
-//#define carrycalc(n) {\
-//    if ((n) & 0xFF00) setcarry();\
-//        else clearcarry();\
-//}
-
-//#define overflowcalc(n, m, o) { /* n = result, m = accumulator, o = memory */ \
-//    if (((n) ^ (uint16_t)(m)) & ((n) ^ (o)) & 0x0080) setoverflow();\
-//        else clearoverflow();\
-//}
 
 
 
@@ -1148,6 +1247,8 @@ impl CPU {
 //        penaltyop = 0;
 //        penaltyaddr = 0;
 
+// TODO: When we get to this part, make certain to set self.addr_acc to false, otherwise there will
+// be some strange behavior that takes place.
 //        (*addrtable[opcode])();
 //        (*optable[opcode])();
 //        clockticks6502 += ticktable[opcode];
