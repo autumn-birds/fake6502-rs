@@ -713,6 +713,7 @@ impl CPU {
     }
 
     //static void bcs() {
+    fn inst_bcs<T: Memory>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_CARRY) == FLAG_CARRY) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -720,6 +721,17 @@ impl CPU {
     //            else clockticks6502++;
     //    }
     //}
+        if (self.status & FLAG_CARRY) == FLAG_CARRY {
+            self.oldpc = self.pc;
+            self.pc += self.reladdr;
+            if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
+                // original: "check if jump crossed a page boundary"
+                self.clockticks += 2;
+            } else {
+                self.clockticks += 1;
+            }
+        }
+    }
 
     //static void beq() {
     //    if ((status & FLAG_ZERO) == FLAG_ZERO) {
