@@ -920,15 +920,32 @@ impl CPU {
     }
 
     //static void cmp() {
+    fn inst_cmp<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
+        self.penaltyop = 1;
     //    value = getvalue();
+        self.value = self.getvalue(mem);
     //    result = (uint16_t)a - value;
+        self.result = self.a as u16 - self.value;
        
     //    if (a >= (uint8_t)(value & 0x00FF)) setcarry();
     //        else clearcarry();
+        if self.a >= (self.value & 0x00FF) as u8 {
+            self.flagset(FLAG_CARRY);
+        } else {
+            self.flagclear(FLAG_CARRY);
+        }
     //    if (a == (uint8_t)(value & 0x00FF)) setzero();
     //        else clearzero();
+        if self.a == (self.value & 0x00FF) as u8 {
+            self.flagset(FLAG_ZERO);
+        } else {
+            self.flagclear(FLAG_ZERO);
+        }
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_sign(r);
+    }
     //}
 
     //static void cpx() {
