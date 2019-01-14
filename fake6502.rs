@@ -771,6 +771,7 @@ impl CPU {
     }
 
     //static void bmi() {
+    fn inst_bmi<T: Memory>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_SIGN) == FLAG_SIGN) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -778,8 +779,20 @@ impl CPU {
     //            else clockticks6502++;
     //    }
     //}
+        if (self.status & FLAG_SIGN) == FLAG_SIGN {
+            self.oldpc = self.pc;
+            self.pc += self.reladdr;
+            if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
+                // original: "check if jump crossed a page boundary"
+                self.clockticks += 2;
+            } else {
+                self.clockticks += 1;
+            }
+        }
+    }
 
     //static void bne() {
+    fn inst_bne<T: Memory>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_ZERO) == 0) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -787,8 +800,20 @@ impl CPU {
     //            else clockticks6502++;
     //    }
     //}
+        if (self.status & FLAG_ZERO) == 0 {
+            self.oldpc = self.pc;
+            self.pc += self.reladdr;
+            if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
+                // original: "check if jump crossed a page boundary"
+                self.clockticks += 2;
+            } else {
+                self.clockticks += 1;
+            }
+        }
+    }
 
     //static void bpl() {
+    fn inst_bpl<T: Memory>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_SIGN) == 0) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -796,16 +821,36 @@ impl CPU {
     //            else clockticks6502++;
     //    }
     //}
+        if (self.status & FLAG_SIGN) == 0 {
+            self.oldpc = self.pc;
+            self.pc += self.reladdr;
+            if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
+                // original: "check if jump crossed a page boundary"
+                self.clockticks += 2;
+            } else {
+                self.clockticks += 1;
+            }
+        }
+    }
 
     //static void brk() {
+    fn inst_brk<T: Memory>(&mut self, mem: &mut T) {
     //    pc++;
     //    push16(pc); //push next instruction address onto stack
     //    push8(status | FLAG_BREAK); //push CPU status to stack
     //    setinterrupt(); //set interrupt flag
     //    pc = (uint16_t)read6502(0xFFFE) | ((uint16_t)read6502(0xFFFF) << 8);
     //}
+        self.pc += 1;
+        let (pc, stat) = (self.pc, self.status);
+        self.push16(mem, pc); // original: "push next instruction address onto stack"
+        self.push8(mem, stat | FLAG_BREAK); // original: "push CPU status to stack"
+        self.flagset(FLAG_INTERRUPT);
+        self.pc = mem.read(0xFFFE) as u16 | ((mem.read(0xFFFF) as u16) << 8);
+    }
 
     //static void bvc() {
+    fn inst_bvc<T: Memory>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_OVERFLOW) == 0) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -813,6 +858,17 @@ impl CPU {
     //            else clockticks6502++;
     //    }
     //}
+        if (self.status & FLAG_OVERFLOW) == 0 {
+            self.oldpc = self.pc;
+            self.pc += self.reladdr;
+            if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
+                // original: "check if jump crossed a page boundary"
+                self.clockticks += 2;
+            } else {
+                self.clockticks += 1;
+            }
+        }
+    }
 
     //static void bvs() {
     //    if ((status & FLAG_OVERFLOW) == FLAG_OVERFLOW) {
