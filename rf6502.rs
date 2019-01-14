@@ -449,6 +449,12 @@ impl CPU {
     //    eahelp = (uint16_t)(((uint16_t)read6502(pc++) + (uint16_t)x) & 0xFF); //zero-page wraparound for table pointer
     //    ea = (uint16_t)read6502(eahelp & 0x00FF) | ((uint16_t)read6502((eahelp+1) & 0x00FF) << 8);
     //}
+    fn addr_indirect_x<T: Memory>(&mut self, mem: &T) {
+        let eahelp: u16;
+        eahelp = (mem.read(self.pc) as u16 + self.x as u16) & 0x00FF; // original: "zero-page wraparound for table"
+        self.ea = mem.read(eahelp & 0x00FF) as u16 | (mem.read((eahelp + 1) & 0x00FF) as u16) << 8;
+        self.pc += 1;
+    }
 
     //static void indy() { // (indirect),Y
     //    uint16_t eahelp, eahelp2, startpage;
@@ -462,6 +468,18 @@ impl CPU {
     //        penaltyaddr = 1;
     //    }
     //}
+    fn addr_indirect_y<T: Memory>(&mut self, mem: &T) {
+        let eahelp: u16 = mem.read(self.pc) as u16;
+        self.pc += 1;
+        let eahelp2: u16 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); // original: "zero-page wraparound"
+        self.ea = mem.read(eahelp) as u16 | ((mem.read(eahelp2) as u16) << 8);
+        let startpage: u16 = self.ea & 0xFF00;
+        self.ea += self.y as u16;
+
+        if startpage != (self.ea & 0xFF00) { // original: "one-cycle penalty for page crossing on some opcodes"
+            self.penaltyaddr = 1;
+        }
+    }
 }
 
 //#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
