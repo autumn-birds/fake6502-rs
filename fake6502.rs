@@ -755,12 +755,20 @@ impl CPU {
     }
 
     //static void bit() {
+    fn inst_bit<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = (uint16_t)a & value;
        
     //    zerocalc(result);
     //    status = (status & 0x3F) | (uint8_t)(value & 0xC0);
     //}
+        self.value = self.getvalue(mem);
+        self.result = self.a as u16 & self.value;
+
+        let r = self.result;
+        self.flagcalc_zero(r);
+        self.status = (self.status & 0x3F) | (self.value & 0x00C0) as u8;
+    }
 
     //static void bmi() {
     //    if ((status & FLAG_SIGN) == FLAG_SIGN) {
