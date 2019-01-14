@@ -1524,11 +1524,15 @@ impl CPU {
     }
 
     //undocumented instructions
+    // TODO: Provide actual implementations.
     //#ifdef UNDOCUMENTED
     //    static void lax() {
     //        lda();
     //        ldx();
     //    }
+    fn inst_lax<T: Memory>(&mut self, mem: &mut T) {
+        self.inst_nop(mem);
+    }
 
     //    static void sax() {
     //        sta();
@@ -1536,42 +1540,64 @@ impl CPU {
     //        putvalue(a & x);
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
+    fn inst_sax<T: Memory>(&mut self, mem: &mut T) {
+        self.inst_nop(mem);
+    }
 
     //    static void dcp() {
     //        dec();
     //        cmp();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
+    fn inst_dcp<T: Memory>(&mut self, mem: &mut T) {
+        self.inst_nop(mem);
+    }
 
     //    static void isb() {
     //        inc();
     //        sbc();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
+    fn inst_isb<T: Memory>(&mut self, mem: &mut T) {
+        self.inst_nop(mem);
+    }
 
     //    static void slo() {
     //        asl();
     //        ora();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
+    fn inst_slo<T: Memory>(&mut self, mem: &mut T) {
+        self.inst_nop(mem);
+    }
 
     //    static void rla() {
     //        rol();
     //        and();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
+    fn inst_rla<T: Memory>(&mut self, mem: &mut T) {
+        self.inst_nop(mem);
+    }
 
     //    static void sre() {
     //        lsr();
     //        eor();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
+    fn inst_sre<T: Memory>(&mut self, mem: &mut T) {
+        self.inst_nop(mem);
+    }
 
     //    static void rra() {
     //        ror();
     //        adc();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
+     fn inst_rra<T: Memory>(&mut self, mem: &mut T) {
+        self.inst_nop(mem);
+    }
+
     //#else
     //    #define lax nop
     //    #define sax nop
