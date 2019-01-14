@@ -524,7 +524,6 @@ impl CPU {
         self.status &= !flag;
     }
 
-
     //flag calculation macros
     //#define zerocalc(n) {\
     //    if ((n) & 0x00FF) clearzero();\
@@ -949,26 +948,62 @@ impl CPU {
     //}
 
     //static void cpx() {
+    fn inst_cpx<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
+        self.value = self.getvalue(mem);
     //    result = (uint16_t)x - value;
+        self.result = self.x as u16 - self.value;
        
     //    if (x >= (uint8_t)(value & 0x00FF)) setcarry();
     //        else clearcarry();
     //    if (x == (uint8_t)(value & 0x00FF)) setzero();
     //        else clearzero();
+        if self.x >= (self.value & 0x00FF) as u8 {
+            self.flagset(FLAG_CARRY);
+        } else {
+            self.flagclear(FLAG_CARRY);
+        }
+
+        if self.x == (self.value & 0x00FF) as u8 {
+            self.flagset(FLAG_ZERO);
+        } else {
+            self.flagclear(FLAG_ZERO);
+        }
+
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_sign(r);
     //}
+    }
 
     //static void cpy() {
+    fn inst_cpy<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = (uint16_t)y - value;
+        self.value = self.getvalue(mem);
+        self.result = self.y as u16 - self.value;
        
     //    if (y >= (uint8_t)(value & 0x00FF)) setcarry();
     //        else clearcarry();
     //    if (y == (uint8_t)(value & 0x00FF)) setzero();
     //        else clearzero();
+        if self.y >= (self.value & 0x00FF) as u8 {
+            self.flagset(FLAG_CARRY);
+        } else {
+            self.flagclear(FLAG_CARRY);
+        }
+
+        if self.y == (self.value & 0x00FF) as u8 {
+            self.flagset(FLAG_ZERO);
+        } else {
+            self.flagclear(FLAG_ZERO);
+        }
+
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_sign(r);
     //}
+    }
 
     //static void dec() {
     //    value = getvalue();
