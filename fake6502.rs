@@ -734,6 +734,7 @@ impl CPU {
     }
 
     //static void beq() {
+    fn inst_beq<T: Memory>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_ZERO) == FLAG_ZERO) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -741,6 +742,17 @@ impl CPU {
     //            else clockticks6502++;
     //    }
     //}
+        if (self.status & FLAG_ZERO) == FLAG_ZERO {
+            self.oldpc = self.pc;
+            self.pc += self.reladdr;
+            if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
+                // original: "check if jump crossed a page boundary"
+                self.clockticks += 2;
+            } else {
+                self.clockticks += 1;
+            }
+        }
+    }
 
     //static void bit() {
     //    value = getvalue();
