@@ -871,6 +871,7 @@ impl CPU {
     }
 
     //static void bvs() {
+    fn inst_bvs<T: Memory>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_OVERFLOW) == FLAG_OVERFLOW) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -878,6 +879,17 @@ impl CPU {
     //            else clockticks6502++;
     //    }
     //}
+        if (self.status & FLAG_OVERFLOW) == FLAG_OVERFLOW {
+            self.oldpc = self.pc;
+            self.pc += self.reladdr;
+            if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
+                // original: "check if jump crossed a page boundary"
+                self.clockticks += 2;
+            } else {
+                self.clockticks += 1;
+            }
+        }
+    }
 
     //static void clc() {
     //    clearcarry();
