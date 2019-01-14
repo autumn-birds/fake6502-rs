@@ -692,13 +692,25 @@ impl CPU {
     }
 
     //static void bcc() {
+    fn inst_bcc<T: Memory>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_CARRY) == 0) {
     //        oldpc = pc;
     //        pc += reladdr;
     //        if ((oldpc & 0xFF00) != (pc & 0xFF00)) clockticks6502 += 2; //check if jump crossed a page boundary
     //            else clockticks6502++;
     //    }
+        if (self.status & FLAG_CARRY) == 0 {
+            self.oldpc = self.pc;
+            self.pc += self.reladdr;
+            if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
+                // original: "check if jump crossed a page boundary"
+                self.clockticks += 2;
+            } else {
+                self.clockticks += 1;
+            }
+        }
     //}
+    }
 
     //static void bcs() {
     //    if ((status & FLAG_CARRY) == FLAG_CARRY) {
