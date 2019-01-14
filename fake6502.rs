@@ -647,30 +647,49 @@ impl CPU {
        
     //    saveaccum(result);
     //}
-        self.save_accumulator(result);
+        let r = self.result;
+        self.save_accumulator(r);
     }
 
     //static void and() {
+    fn inst_and<T: Memory>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    result = (uint16_t)a & value;
+        self.penaltyop = 1;
+        self.value = self.getvalue(mem);
+        self.result = (self.a as u16) & self.value;
        
     //    zerocalc(result);
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_zero(r);
+        self.flagcalc_sign(r);
        
     //    saveaccum(result);
+        self.save_accumulator(r);
     //}
+    }
 
     //static void asl() {
+    fn inst_asl<T: Memory>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = value << 1;
+        self.value = self.getvalue(mem);
+        self.result = self.value << 1;
 
     //    carrycalc(result);
     //    zerocalc(result);
     //    signcalc(result);
+        let r = self.result;
+        self.flagcalc_carry(r);
+        self.flagcalc_zero(r);
+        self.flagcalc_sign(r);
        
     //    putvalue(result);
     //}
+        self.putvalue(mem, r);
+    }
 
     //static void bcc() {
     //    if ((status & FLAG_CARRY) == 0) {
