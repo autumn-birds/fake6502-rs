@@ -115,7 +115,7 @@
                      //CPU in the Nintendo Entertainment System does not
                      //support BCD operation.
 
-use std::num::Wrapping;
+//use std::num::Wrapping;
 
 const UNDOCUMENTED: bool = false;
 const NES_CPU: bool = false;
@@ -174,6 +174,7 @@ struct CPU {
     // that read a byte and set this value to the appropriate address.
     ea: u16,
     reladdr: u16,
+    penaltyaddr: u8,
     value: u16,
     result: u16,
     opcode: u8,
@@ -202,7 +203,7 @@ impl CPU {
     // CPU struct to own its memory.
 
     fn new() -> CPU {
-        CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 };
+        CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, penaltyaddr: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 }
     }
 
     // TODO: Figure out how to deal with the overflow problem. In C, it would have wrapped around,
@@ -215,6 +216,9 @@ impl CPU {
     //
     // (I found out it panics only in debug mode. But that definitely doesn't mean we should
     // just always run in release mode.)
+
+    // TODO: A lot of functions would like to "read the byte under pc and advance pc."  We should
+    // probably make that a small utility function.
 
     //a few general functions used by various other functions
     //void push16(uint16_t pushval) {
@@ -275,23 +279,193 @@ impl CPU {
         self.sp = 0xFD;
         self.status |= FLAG_CONSTANT;
     }
+
+    //flag modifier macros
+    //#define setcarry() status |= FLAG_CARRY
+    //#define clearcarry() status &= (~FLAG_CARRY)
+    //#define setzero() status |= FLAG_ZERO
+    //#define clearzero() status &= (~FLAG_ZERO)
+    //#define setinterrupt() status |= FLAG_INTERRUPT
+    //#define clearinterrupt() status &= (~FLAG_INTERRUPT)
+    //#define setdecimal() status |= FLAG_DECIMAL
+    //#define cleardecimal() status &= (~FLAG_DECIMAL)
+    //#define setoverflow() status |= FLAG_OVERFLOW
+    //#define clearoverflow() status &= (~FLAG_OVERFLOW)
+    //#define setsign() status |= FLAG_SIGN
+    //#define clearsign() status &= (~FLAG_SIGN)
+
+    // This *seems* less efficient since they're actual functions. But I'm hoping the compiler is
+    // scary-smart and might just realise it might not need an actual function call and return for
+    // these, or whatever other optimization tricks it has up its sleeve. Maybe calling them on
+    // const values also helps? I dunno.
+    //
+    // We could just write it out by hand every time. But these probably don't cost *too* much.
+    fn flagset<T: Memory>(&mut self, flag: u8) {
+        self.status |= flag;
+    }
+
+    fn flagclear<T: Memory>(&mut self, flag: u8) {
+        self.status &= !flag;
+    }
+
+    //addressing mode functions, calculates effective addresses
+    //static void imp() { //implied
+    //}
+    fn addr_implied<T: Memory>(&mut self, _mem: &T) {
+    }
+
+    //static void acc() { //accumulator
+    //}
+    fn addr_accumulator<T: Memory>(&mut self, _mem: &T) {
+    }
+
+    //static void imm() { //immediate
+    //    ea = pc++;
+    //}
+    fn addr_immediate<T: Memory>(&mut self, _mem: &T) {
+        self.ea = self.pc as u16;
+        self.pc += 1;
+    }
+
+    //static void zp() { //zero-page
+    //    ea = (uint16_t)read6502((uint16_t)pc++);
+    //}
+    fn addr_zeropage<T: Memory>(&mut self, mem: &T) {
+        self.ea = mem.read(self.pc) as u16;
+        self.pc += 1;
+    }
+
+    //static void zpx() { //zero-page,X
+    //    ea = ((uint16_t)read6502((uint16_t)pc++) + (uint16_t)x) & 0xFF; //zero-page wraparound
+    //}
+    fn addr_zeropage_x<T: Memory>(&mut self, mem: &T) {
+        self.ea = mem.read(self.pc) as u16 + (self.x as u16 & 0x00FF);
+        // ( the & 0x00FF thing for zero-page wraparound)
+        self.pc += 1;
+    }
+
+    //static void zpy() { //zero-page,Y
+    //    ea = ((uint16_t)read6502((uint16_t)pc++) + (uint16_t)y) & 0xFF; //zero-page wraparound
+    //}
+    fn addr_zeropage_y<T: Memory>(&mut self, mem: &T) {
+        self.ea = mem.read(self.pc) as u16 + (self.y as u16 & 0x00FF);
+        // ( the & 0x00FF thing maybe for zero-page wraparound? blehhh)
+        self.pc += 1;
+    }
+
+    //static void rel() { //relative for branch ops (8-bit immediate value, sign-extended)
+    //    reladdr = (uint16_t)read6502(pc++);
+    //    if (reladdr & 0x80) reladdr |= 0xFF00;
+    //}
+    fn addr_relative_branch<T: Memory>(&mut self, mem: &T) {
+        self.reladdr = mem.read(self.pc) as u16;
+        if self.reladdr & 0x0080 != 0 {
+            self.reladdr |= 0xFF00;
+        }
+        self.pc += 1;
+    }
+
+    //static void abso() { //absolute
+    //    ea = (uint16_t)read6502(pc) | ((uint16_t)read6502(pc+1) << 8);
+    //    pc += 2;
+    //}
+    fn addr_absolute<T: Memory>(&mut self, mem: &T) {
+        self.ea = mem.read(self.pc) as u16;
+        self.ea |= (mem.read(self.pc + 1) as u16) << 8;
+        self.pc += 2;
+    }
+
+    //static void absx() { //absolute,X
+    //    uint16_t startpage;
+    //    ea = ((uint16_t)read6502(pc) | ((uint16_t)read6502(pc+1) << 8));
+    //    startpage = ea & 0xFF00;
+    //    ea += (uint16_t)x;
+
+    //    if (startpage != (ea & 0xFF00)) { //one cycle penlty for page-crossing on some opcodes
+    //        penaltyaddr = 1;
+    //    }
+
+    //    pc += 2;
+    //}
+    fn addr_absolute_x<T: Memory>(&mut self, mem: &T) {
+        let startpage: u16;
+        self.ea = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
+        startpage = self.ea & 0xFF00;
+        self.ea += self.x as u16;
+
+        if startpage != (self.ea & 0xFF00) {
+            // original source: "one cycle penalty for page-crossing on some opcodes"
+            self.penaltyaddr = 1;
+        }
+
+        self.pc += 2;
+    }
+
+    //static void absy() { //absolute,Y
+    //    uint16_t startpage;
+    //    ea = ((uint16_t)read6502(pc) | ((uint16_t)read6502(pc+1) << 8));
+    //    startpage = ea & 0xFF00;
+    //    ea += (uint16_t)y;
+
+    //    if (startpage != (ea & 0xFF00)) { //one cycle penlty for page-crossing on some opcodes
+    //        penaltyaddr = 1;
+    //    }
+
+    //    pc += 2;
+    //}
+    fn addr_absolute_y<T: Memory>(&mut self, mem: &T) {
+        let startpage: u16;
+        self.ea = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
+        startpage = self.ea & 0xFF00;
+        self.ea += self.y as u16;
+
+        if startpage != (self.ea & 0xFF00) {
+            // original source: "one cycle penalty for page-crossing on some opcodes"
+            self.penaltyaddr = 1;
+        }
+
+        self.pc += 2;
+    }
+
+    //static void ind() { //indirect
+    //    uint16_t eahelp, eahelp2;
+    //    eahelp = (uint16_t)read6502(pc) | (uint16_t)((uint16_t)read6502(pc+1) << 8);
+    //    eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); //replicate 6502 page-boundary wraparound bug
+    //    ea = (uint16_t)read6502(eahelp) | ((uint16_t)read6502(eahelp2) << 8);
+    //    pc += 2;
+    //}
+    fn addr_indirect<T: Memory>(&mut self, mem: &T) {
+        let eahelp: u16;
+        let eahelp2: u16;
+        eahelp = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
+        // original source: "replicate 6502 page-boundary wraparound bug"
+        eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF);
+        self.ea = mem.read(eahelp) as u16 | (mem.read(eahelp2) as u16) << 8;
+        self.pc += 2;
+    }
+
+    //static void indx() { // (indirect,X)
+    //    uint16_t eahelp;
+    //    eahelp = (uint16_t)(((uint16_t)read6502(pc++) + (uint16_t)x) & 0xFF); //zero-page wraparound for table pointer
+    //    ea = (uint16_t)read6502(eahelp & 0x00FF) | ((uint16_t)read6502((eahelp+1) & 0x00FF) << 8);
+    //}
+
+    //static void indy() { // (indirect),Y
+    //    uint16_t eahelp, eahelp2, startpage;
+    //    eahelp = (uint16_t)read6502(pc++);
+    //    eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); //zero-page wraparound
+    //    ea = (uint16_t)read6502(eahelp) | ((uint16_t)read6502(eahelp2) << 8);
+    //    startpage = ea & 0xFF00;
+    //    ea += (uint16_t)y;
+
+    //    if (startpage != (ea & 0xFF00)) { //one cycle penlty for page-crossing on some opcodes
+    //        penaltyaddr = 1;
+    //    }
+    //}
 }
 
 //#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
 
-//flag modifier macros
-//#define setcarry() status |= FLAG_CARRY
-//#define clearcarry() status &= (~FLAG_CARRY)
-//#define setzero() status |= FLAG_ZERO
-//#define clearzero() status &= (~FLAG_ZERO)
-//#define setinterrupt() status |= FLAG_INTERRUPT
-//#define clearinterrupt() status &= (~FLAG_INTERRUPT)
-//#define setdecimal() status |= FLAG_DECIMAL
-//#define cleardecimal() status &= (~FLAG_DECIMAL)
-//#define setoverflow() status |= FLAG_OVERFLOW
-//#define clearoverflow() status &= (~FLAG_OVERFLOW)
-//#define setsign() status |= FLAG_SIGN
-//#define clearsign() status &= (~FLAG_SIGN)
 
 //flag calculation macros
 //#define zerocalc(n) {\
@@ -320,91 +494,6 @@ impl CPU {
 //static void (*optable[256])();
 //uint8_t penaltyop, penaltyaddr;
 
-//addressing mode functions, calculates effective addresses
-//static void imp() { //implied
-//}
-
-//static void acc() { //accumulator
-//}
-
-//static void imm() { //immediate
-//    ea = pc++;
-//}
-
-//static void zp() { //zero-page
-//    ea = (uint16_t)read6502((uint16_t)pc++);
-//}
-
-//static void zpx() { //zero-page,X
-//    ea = ((uint16_t)read6502((uint16_t)pc++) + (uint16_t)x) & 0xFF; //zero-page wraparound
-//}
-
-//static void zpy() { //zero-page,Y
-//    ea = ((uint16_t)read6502((uint16_t)pc++) + (uint16_t)y) & 0xFF; //zero-page wraparound
-//}
-
-//static void rel() { //relative for branch ops (8-bit immediate value, sign-extended)
-//    reladdr = (uint16_t)read6502(pc++);
-//    if (reladdr & 0x80) reladdr |= 0xFF00;
-//}
-
-//static void abso() { //absolute
-//    ea = (uint16_t)read6502(pc) | ((uint16_t)read6502(pc+1) << 8);
-//    pc += 2;
-//}
-
-//static void absx() { //absolute,X
-//    uint16_t startpage;
-//    ea = ((uint16_t)read6502(pc) | ((uint16_t)read6502(pc+1) << 8));
-//    startpage = ea & 0xFF00;
-//    ea += (uint16_t)x;
-
-//    if (startpage != (ea & 0xFF00)) { //one cycle penlty for page-crossing on some opcodes
-//        penaltyaddr = 1;
-//    }
-
-//    pc += 2;
-//}
-
-//static void absy() { //absolute,Y
-//    uint16_t startpage;
-//    ea = ((uint16_t)read6502(pc) | ((uint16_t)read6502(pc+1) << 8));
-//    startpage = ea & 0xFF00;
-//    ea += (uint16_t)y;
-
-//    if (startpage != (ea & 0xFF00)) { //one cycle penlty for page-crossing on some opcodes
-//        penaltyaddr = 1;
-//    }
-
-//    pc += 2;
-//}
-
-//static void ind() { //indirect
-//    uint16_t eahelp, eahelp2;
-//    eahelp = (uint16_t)read6502(pc) | (uint16_t)((uint16_t)read6502(pc+1) << 8);
-//    eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); //replicate 6502 page-boundary wraparound bug
-//    ea = (uint16_t)read6502(eahelp) | ((uint16_t)read6502(eahelp2) << 8);
-//    pc += 2;
-//}
-
-//static void indx() { // (indirect,X)
-//    uint16_t eahelp;
-//    eahelp = (uint16_t)(((uint16_t)read6502(pc++) + (uint16_t)x) & 0xFF); //zero-page wraparound for table pointer
-//    ea = (uint16_t)read6502(eahelp & 0x00FF) | ((uint16_t)read6502((eahelp+1) & 0x00FF) << 8);
-//}
-
-//static void indy() { // (indirect),Y
-//    uint16_t eahelp, eahelp2, startpage;
-//    eahelp = (uint16_t)read6502(pc++);
-//    eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); //zero-page wraparound
-//    ea = (uint16_t)read6502(eahelp) | ((uint16_t)read6502(eahelp2) << 8);
-//    startpage = ea & 0xFF00;
-//    ea += (uint16_t)y;
-
-//    if (startpage != (ea & 0xFF00)) { //one cycle penlty for page-crossing on some opcodes
-//        penaltyaddr = 1;
-//    }
-//}
 
 //static uint16_t getvalue() {
 //    if (addrtable[opcode] == acc) return((uint16_t)a);
