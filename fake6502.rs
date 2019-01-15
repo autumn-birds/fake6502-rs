@@ -171,9 +171,9 @@ struct CPU {
     // used. Since I opted to turn those into a match in the Rust version, I needed a different way
     // to implement the same conditional.
     addr_acc: bool,
-    // Some of these are probably not needed in the struct, but for a direct port, it's easiest,
-    // perhaps, to start out not trying to reason about whether a variable's state being carried
-    // over between calls will matter.
+    // Some of these, perhaps especially 'result', are probably not needed in the struct, but for a
+    // direct port, it's easiest, perhaps, to start out not trying to reason about whether a
+    // variable's state being carried over between calls will matter.
     oldpc: u16,
     // EA = Effective Address? This one *is* needed: Addressing modes are implemented as functions
     // that read a byte and set this value to the appropriate address.
@@ -305,7 +305,7 @@ impl CPU {
     //}
     fn addr_immediate<T: Memory>(&mut self, _mem: &T) {
         self.ea = self.pc as u16;
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
     }
 
     //static void zp() { //zero-page
@@ -313,7 +313,7 @@ impl CPU {
     //}
     fn addr_zeropage<T: Memory>(&mut self, mem: &T) {
         self.ea = mem.read(self.pc) as u16;
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
     }
 
     //static void zpx() { //zero-page,X
@@ -322,7 +322,7 @@ impl CPU {
     fn addr_zeropage_x<T: Memory>(&mut self, mem: &T) {
         self.ea = mem.read(self.pc) as u16 + (self.x as u16 & 0x00FF);
         // ( the & 0x00FF thing for zero-page wraparound)
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
     }
 
     //static void zpy() { //zero-page,Y
@@ -331,7 +331,7 @@ impl CPU {
     fn addr_zeropage_y<T: Memory>(&mut self, mem: &T) {
         self.ea = mem.read(self.pc) as u16 + (self.y as u16 & 0x00FF);
         // ( the & 0x00FF thing maybe for zero-page wraparound? blehhh)
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
     }
 
     //static void rel() { //relative for branch ops (8-bit immediate value, sign-extended)
@@ -343,7 +343,7 @@ impl CPU {
         if self.reladdr & 0x0080 != 0 {
             self.reladdr |= 0xFF00;
         }
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
     }
 
     //static void abso() { //absolute
@@ -353,7 +353,7 @@ impl CPU {
     fn addr_absolute<T: Memory>(&mut self, mem: &T) {
         self.ea = mem.read(self.pc) as u16;
         self.ea |= (mem.read(self.pc + 1) as u16) << 8;
-        self.pc += 2;
+        self.pc = self.pc.wrapping_add(2);
     }
 
     //static void absx() { //absolute,X
@@ -379,7 +379,7 @@ impl CPU {
             self.penaltyaddr = 1;
         }
 
-        self.pc += 2;
+        self.pc = self.pc.wrapping_add(2);
     }
 
     //static void absy() { //absolute,Y
@@ -405,7 +405,7 @@ impl CPU {
             self.penaltyaddr = 1;
         }
 
-        self.pc += 2;
+        self.pc = self.pc.wrapping_add(2);
     }
 
     //static void ind() { //indirect
@@ -422,7 +422,7 @@ impl CPU {
         // original source: "replicate 6502 page-boundary wraparound bug"
         eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF);
         self.ea = mem.read(eahelp) as u16 | (mem.read(eahelp2) as u16) << 8;
-        self.pc += 2;
+        self.pc = self.pc.wrapping_add(2);
     }
 
     //static void indx() { // (indirect,X)
@@ -434,7 +434,7 @@ impl CPU {
         let eahelp: u16;
         eahelp = (mem.read(self.pc) as u16 + self.x as u16) & 0x00FF; // original: "zero-page wraparound for table"
         self.ea = mem.read(eahelp & 0x00FF) as u16 | (mem.read((eahelp + 1) & 0x00FF) as u16) << 8;
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
     }
 
     //static void indy() { // (indirect),Y
@@ -451,7 +451,7 @@ impl CPU {
     //}
     fn addr_indirect_y<T: Memory>(&mut self, mem: &T) {
         let eahelp: u16 = mem.read(self.pc) as u16;
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
         let eahelp2: u16 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); // original: "zero-page wraparound"
         self.ea = mem.read(eahelp) as u16 | ((mem.read(eahelp2) as u16) << 8);
         let startpage: u16 = self.ea & 0xFF00;
@@ -700,7 +700,7 @@ impl CPU {
     //    }
         if (self.status & FLAG_CARRY) == 0 {
             self.oldpc = self.pc;
-            self.pc += self.reladdr;
+            self.pc = self.pc.wrapping_add(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -722,7 +722,7 @@ impl CPU {
     //}
         if (self.status & FLAG_CARRY) == FLAG_CARRY {
             self.oldpc = self.pc;
-            self.pc += self.reladdr;
+            self.pc = self.pc.wrapping_add(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -743,7 +743,7 @@ impl CPU {
     //}
         if (self.status & FLAG_ZERO) == FLAG_ZERO {
             self.oldpc = self.pc;
-            self.pc += self.reladdr;
+            self.pc = self.pc.wrapping_add(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -780,7 +780,7 @@ impl CPU {
     //}
         if (self.status & FLAG_SIGN) == FLAG_SIGN {
             self.oldpc = self.pc;
-            self.pc += self.reladdr;
+            self.pc = self.pc.wrapping_add(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -801,7 +801,7 @@ impl CPU {
     //}
         if (self.status & FLAG_ZERO) == 0 {
             self.oldpc = self.pc;
-            self.pc += self.reladdr;
+            self.pc = self.pc.wrapping_add(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -822,7 +822,7 @@ impl CPU {
     //}
         if (self.status & FLAG_SIGN) == 0 {
             self.oldpc = self.pc;
-            self.pc += self.reladdr;
+            self.pc = self.pc.wrapping_add(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -840,7 +840,7 @@ impl CPU {
     //    setinterrupt(); //set interrupt flag
     //    pc = (uint16_t)read6502(0xFFFE) | ((uint16_t)read6502(0xFFFF) << 8);
     //}
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
         let (pc, stat) = (self.pc, self.status);
         self.push16(mem, pc); // original: "push next instruction address onto stack"
         self.push8(mem, stat | FLAG_BREAK); // original: "push CPU status to stack"
@@ -859,7 +859,7 @@ impl CPU {
     //}
         if (self.status & FLAG_OVERFLOW) == 0 {
             self.oldpc = self.pc;
-            self.pc += self.reladdr;
+            self.pc = self.pc.wrapping_add(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -880,7 +880,7 @@ impl CPU {
     //}
         if (self.status & FLAG_OVERFLOW) == FLAG_OVERFLOW {
             self.oldpc = self.pc;
-            self.pc += self.reladdr;
+            self.pc = self.pc.wrapping_add(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -1637,7 +1637,7 @@ impl CPU {
     //        opcode = read6502(pc++);
     //        status |= FLAG_CONSTANT;
             self.opcode = mem.read(self.pc);
-            self.pc += 1;
+            self.pc = self.pc.wrapping_add(1);
             self.flagset(FLAG_CONSTANT);
 
     //        penaltyop = 0;
