@@ -1633,7 +1633,7 @@ impl CPU {
     //void (*loopexternal)();
 
     //void exec6502(uint32_t tickcount) {
-    pub fn exec<T: Backplane, F: FnMut(&mut CPU) -> ()>(&mut self, mem: &mut T, tickcount: u32, callback: Option<F>) {
+    pub fn exec<T: Backplane>(&mut self, mem: &mut T, tickcount: u32) {
     //    clockgoal6502 += tickcount;
         self.clockgoal += tickcount;
 
@@ -1666,6 +1666,13 @@ impl CPU {
 
             // TODO: Figure out how a callback works. Maybe an Option<fn>?
     //        if (callexternal) (*loopexternal)();
+            
+            if self.do_callback {
+                if !mem.each_instr(self) {
+                    break;
+                }
+            }
+
     //    }
     //}
         }
