@@ -160,7 +160,7 @@ pub struct CPU {
     pub a: Wrapping<u8>,
     pub x: Wrapping<u8>,
     pub y: Wrapping<u8>,
-    pub status: Wrapping<u8>,
+    pub status: u8,
 
     /* Helper variables: */
     pub instructions_ran: u32,
@@ -598,9 +598,9 @@ impl CPU {
         }
     }
 
-    fn flagcalc_overflow(&mut self, n: u16, m: u8, o: u16) {
+    fn flagcalc_overflow(&mut self, n: Wrapping<u16>, m: Wrapping<u8>, o: Wrapping<u16>) {
         // (The ^ is not exponentiation but bitwise XOR. Most people probably know this.)
-        if (n ^ (m as u16)) & ((n ^ o) & 0x0080) != 0 {
+        if (n ^ Wrapping(m as u16)) & ((n ^ o) & Wrapping(0x0080)) != 0 {
             self.flagset(FLAG_OVERFLOW);
         } else {
             self.flagclear(FLAG_OVERFLOW);
@@ -630,7 +630,7 @@ impl CPU {
         // trying to use a value (e.g., self.result) I've already borrowed (by calling, e.g.,
         // self.flagcalc_carry). It feels like there ought to be a less dumb way to do it, but for
         // now this at least compiles...
-        let (r, a, v) = (self.result, self.a, self.value);
+        let (r, a, v) = (self.result.0, self.a.0, self.value.0);
         self.flagcalc_carry(r);
         self.flagcalc_zero(r);
         self.flagcalc_overflow(r, a, v);
@@ -1052,7 +1052,7 @@ impl CPU {
     //static void dex() {
     fn inst_dex<T: Backplane>(&mut self, _mem: &mut T) {
     //    x--;
-        self.x -= 1;
+        self.x -= Wrapping(1);
        
     //    zerocalc(x);
     //    signcalc(x);
@@ -1065,7 +1065,7 @@ impl CPU {
     //static void dey() {
     fn inst_dey<T: Backplane>(&mut self, _mem: &mut T) {
     //    y--;
-        self.y -= 1;
+        self.y -= Wrapping(1);
        
     //    zerocalc(y);
     //    signcalc(y);
@@ -1379,13 +1379,13 @@ impl CPU {
     //    result = (uint16_t)a + value + (uint16_t)(status & FLAG_CARRY);
         self.penaltyop = 1;
         self.value = self.getvalue(mem) ^ 0x00FF;
-        self.result = self.a.0 as u16 + self.value + (self.status & FLAG_CARRY) as u16;
+        self.result = Wrapping(self.a.0 as u16) + self.value + Wrapping((self.status & FLAG_CARRY) as u16);
        
     //    carrycalc(result);
     //    zerocalc(result);
     //    overflowcalc(result, a, value);
     //    signcalc(result);
-        let (r, a, v) = (self.result, self.a, self.value);
+        let (r, a, v) = (self.result.0, self.a.0, self.value.0);
         self.flagcalc_carry(r);
         self.flagcalc_zero(r);
         self.flagcalc_overflow(r, a, v);
@@ -1411,7 +1411,7 @@ impl CPU {
 
                 // TODO: This is definitely going to overflow sometimes, we should probably have
                 // figured out what to do earlier...
-                self.a -= 0x66;
+                self.a -= Wrapping(0x66);
                 if (self.a.0 self.a & 0x0F) > 0x09 {
                     self.a += Wrapping(0x06);
                 }
