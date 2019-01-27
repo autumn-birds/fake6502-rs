@@ -115,7 +115,7 @@
                      //CPU in the Nintendo Entertainment System does not
                      //support BCD operation.
 
-//use std::num::Wrapping;
+use std::num::Wrapping;
 
 const UNDOCUMENTED: bool = false;
 const NES_CPU: bool = false;
@@ -155,12 +155,12 @@ const BASE_STACK: u16 = 0x100;
 
 pub struct CPU {
     /* 6502 CPU registers: */
-    pub pc: u16,
-    pub sp: u8,
-    pub a: u8,
-    pub x: u8,
-    pub y: u8,
-    pub status: u8,
+    pub pc: Wrapping<u16>,
+    pub sp: Wrapping<u8>,
+    pub a: Wrapping<u8>,
+    pub x: Wrapping<u8>,
+    pub y: Wrapping<u8>,
+    pub status: Wrapping<u8>,
 
     /* Helper variables: */
     pub instructions_ran: u32,
@@ -174,16 +174,16 @@ pub struct CPU {
     // Some of these, perhaps especially 'result', are probably not needed in the struct, but for a
     // direct port, it's easiest, perhaps, to start out not trying to reason about whether a
     // variable's state being carried over between calls will matter.
-    oldpc: u16,
+    oldpc: Wrapping<u16>,
     // EA = Effective Address? This one *is* needed: Addressing modes are implemented as functions
     // that read a byte and set this value to the appropriate address.
-    ea: u16,
-    reladdr: u16,
+    ea: Wrapping<u16>,
+    reladdr: Wrapping<u16>,
     //uint8_t penaltyop, penaltyaddr;
     penaltyop: u8,
     penaltyaddr: u8,
-    value: u16,
-    result: u16,
+    value: Wrapping<u16>,
+    result: Wrapping<u16>,
     opcode: u8,
     oldstatus: u8,
 
@@ -215,7 +215,28 @@ impl CPU {
     // CPU struct to own its memory.
 
     pub fn new() -> CPU {
-        CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, addr_acc: false, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, penaltyaddr: 0, penaltyop: 0, value: 0, result: 0, opcode: 0, oldstatus: 0, do_callback: true }
+        CPU {
+            pc: Wrapping(0),
+            sp: Wrapping(0xFD),
+            a: Wrapping(0),
+            x: Wrapping(0),
+            y: Wrapping(0),
+            status: Wrapping(0),
+            addr_acc: false,
+            instructions_ran: 0,
+            clockticks: 0,
+            clockgoal: 0,
+            oldpc: Wrapping(0),
+            ea: Wrapping(0),
+            reladdr: Wrapping(0),
+            penaltyaddr: 0,
+            penaltyop: 0,
+            value: Wrapping(0),
+            result: Wrapping(0),
+            opcode: 0,
+            oldstatus: 0,
+            do_callback: true
+        }
     }
 
     // TODO: Figure out how to deal with the overflow problem. In C, it would have wrapped around,
@@ -284,11 +305,11 @@ impl CPU {
     //    status |= FLAG_CONSTANT;
     //}
     fn reset<T: Backplane>(&mut self, mem: &T) {
-        self.pc = mem.read(0xFFFC) as u16 | ((mem.read(0xFFFD) as u16) << 8);
-        self.a = 0;
-        self.x = 0;
-        self.y = 0;
-        self.sp = 0xFD;
+        self.pc = Wrapping(mem.read(0xFFFC) as u16 | ((mem.read(0xFFFD) as u16) << 8));
+        self.a = Wrapping(0);
+        self.x = Wrapping(0);
+        self.y = Wrapping(0);
+        self.sp = Wrapping(0xFD);
         self.status |= FLAG_CONSTANT;
     }
 
@@ -309,34 +330,34 @@ impl CPU {
     //    ea = pc++;
     //}
     fn addr_immediate<T: Backplane>(&mut self, _mem: &T) {
-        self.ea = self.pc as u16;
-        self.pc = self.pc.wrapping_add(1);
+        self.ea = Wrapping(self.pc as u16);
+        self.pc = Wrapping(self.pc + Wrapping(1));
     }
 
     //static void zp() { //zero-page
     //    ea = (uint16_t)read6502((uint16_t)pc++);
     //}
     fn addr_zeropage<T: Backplane>(&mut self, mem: &T) {
-        self.ea = mem.read(self.pc) as u16;
-        self.pc = self.pc.wrapping_add(1);
+        self.ea = mem.read(self.pc.0) as u16;
+        self.pc = self.pc + Wrapping(1);
     }
 
     //static void zpx() { //zero-page,X
     //    ea = ((uint16_t)read6502((uint16_t)pc++) + (uint16_t)x) & 0xFF; //zero-page wraparound
     //}
     fn addr_zeropage_x<T: Backplane>(&mut self, mem: &T) {
-        self.ea = mem.read(self.pc) as u16 + (self.x as u16 & 0x00FF);
+        self.ea = Wrapping(mem.read(self.pc.0) as u16 + (self.x.0 as u16)) & 0x00FF;
         // ( the & 0x00FF thing for zero-page wraparound)
-        self.pc = self.pc.wrapping_add(1);
+        self.pc = self.pc + Wrapping(1);
     }
 
     //static void zpy() { //zero-page,Y
     //    ea = ((uint16_t)read6502((uint16_t)pc++) + (uint16_t)y) & 0xFF; //zero-page wraparound
     //}
     fn addr_zeropage_y<T: Backplane>(&mut self, mem: &T) {
-        self.ea = mem.read(self.pc) as u16 + (self.y as u16 & 0x00FF);
+        self.ea = mem.read(self.pc.0) as u16 + (self.y.0 as u16 & 0x00FF);
         // ( the & 0x00FF thing maybe for zero-page wraparound? blehhh)
-        self.pc = self.pc.wrapping_add(1);
+        self.pc = self.pc + Wrapping(1);
     }
 
     //static void rel() { //relative for branch ops (8-bit immediate value, sign-extended)
@@ -344,11 +365,11 @@ impl CPU {
     //    if (reladdr & 0x80) reladdr |= 0xFF00;
     //}
     fn addr_relative_branch<T: Backplane>(&mut self, mem: &T) {
-        self.reladdr = mem.read(self.pc) as u16;
+        self.reladdr = mem.read(self.pc.0) as u16;
         if self.reladdr & 0x0080 != 0 {
             self.reladdr |= 0xFF00;
         }
-        self.pc = self.pc.wrapping_add(1);
+        self.pc = self.pc + Wrapping(1);
     }
 
     //static void abso() { //absolute
@@ -356,9 +377,9 @@ impl CPU {
     //    pc += 2;
     //}
     fn addr_absolute<T: Backplane>(&mut self, mem: &T) {
-        self.ea = mem.read(self.pc) as u16;
+        self.ea = mem.read(self.pc.0) as u16;
         self.ea |= (mem.read(self.pc + 1) as u16) << 8;
-        self.pc = self.pc.wrapping_add(2);
+        self.pc = self.pc + Wrapping(2);
     }
 
     //static void absx() { //absolute,X
@@ -375,16 +396,16 @@ impl CPU {
     //}
     fn addr_absolute_x<T: Backplane>(&mut self, mem: &T) {
         let startpage: u16;
-        self.ea = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
+        self.ea = mem.read(self.pc.0) as u16 | (mem.read(self.pc + 1) as u16) << 8;
         startpage = self.ea & 0xFF00;
-        self.ea += self.x as u16;
+        self.ea += self.x.0 as u16;
 
         if startpage != (self.ea & 0xFF00) {
             // original source: "one cycle penalty for page-crossing on some opcodes"
             self.penaltyaddr = 1;
         }
 
-        self.pc = self.pc.wrapping_add(2);
+        self.pc = self.pc + Wrapping(2);
     }
 
     //static void absy() { //absolute,Y
@@ -401,16 +422,16 @@ impl CPU {
     //}
     fn addr_absolute_y<T: Backplane>(&mut self, mem: &T) {
         let startpage: u16;
-        self.ea = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
+        self.ea = mem.read(self.pc.0) as u16 | (mem.read(self.pc + 1) as u16) << 8;
         startpage = self.ea & 0xFF00;
-        self.ea += self.y as u16;
+        self.ea += self.y.0 as u16;
 
         if startpage != (self.ea & 0xFF00) {
             // original source: "one cycle penalty for page-crossing on some opcodes"
             self.penaltyaddr = 1;
         }
 
-        self.pc = self.pc.wrapping_add(2);
+        self.pc = self.pc + Wrapping(2);
     }
 
     //static void ind() { //indirect
@@ -423,11 +444,11 @@ impl CPU {
     fn addr_indirect<T: Backplane>(&mut self, mem: &T) {
         let eahelp: u16;
         let eahelp2: u16;
-        eahelp = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
+        eahelp = mem.read(self.pc.0) as u16 | (mem.read(self.pc + 1) as u16) << 8;
         // original source: "replicate 6502 page-boundary wraparound bug"
         eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF);
         self.ea = mem.read(eahelp) as u16 | (mem.read(eahelp2) as u16) << 8;
-        self.pc = self.pc.wrapping_add(2);
+        self.pc = self.pc + Wrapping(2);
     }
 
     //static void indx() { // (indirect,X)
@@ -437,9 +458,9 @@ impl CPU {
     //}
     fn addr_indirect_x<T: Backplane>(&mut self, mem: &T) {
         let eahelp: u16;
-        eahelp = (mem.read(self.pc) as u16 + self.x as u16) & 0x00FF; // original: "zero-page wraparound for table"
+        eahelp = (mem.read(self.pc.0) as u16 + self.x.0 as u16) & 0x00FF; // original: "zero-page wraparound for table"
         self.ea = mem.read(eahelp & 0x00FF) as u16 | (mem.read((eahelp + 1) & 0x00FF) as u16) << 8;
-        self.pc = self.pc.wrapping_add(1);
+        self.pc = self.pc + Wrapping(1);
     }
 
     //static void indy() { // (indirect),Y
@@ -455,12 +476,12 @@ impl CPU {
     //    }
     //}
     fn addr_indirect_y<T: Backplane>(&mut self, mem: &T) {
-        let eahelp: u16 = mem.read(self.pc) as u16;
-        self.pc = self.pc.wrapping_add(1);
+        let eahelp: u16 = mem.read(self.pc.0) as u16;
+        self.pc = self.pc + Wrapping(1);
         let eahelp2: u16 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); // original: "zero-page wraparound"
         self.ea = mem.read(eahelp) as u16 | ((mem.read(eahelp2) as u16) << 8);
         let startpage: u16 = self.ea & 0xFF00;
-        self.ea += self.y as u16;
+        self.ea += self.y.0 as u16;
 
         if startpage != (self.ea & 0xFF00) { // original: "one-cycle penalty for page crossing on some opcodes"
             self.penaltyaddr = 1;
@@ -475,7 +496,7 @@ impl CPU {
     fn getvalue<T: Backplane>(&mut self, mem: &T) -> u16 {
         // But why is it u16...?
         if self.addr_acc {
-            self.a as u16
+            self.a.0 as u16
         } else {
             mem.read(self.ea) as u16
         }
@@ -587,7 +608,7 @@ impl CPU {
     }
 
     //#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
-    fn save_accumulator(&mut self, n: u16) {
+    fn save_accumulator(&mut self, n: Wrapping<u16>) {
         self.a = (n & 0x00FF) as u8;
     }
 
@@ -600,7 +621,7 @@ impl CPU {
     //    value = getvalue();
         self.value = self.getvalue(mem);
     //    result = (uint16_t)a + value + (uint16_t)(status & FLAG_CARRY);
-        self.result = self.a as u16 + self.value + (self.status & FLAG_CARRY) as u16;
+        self.result = self.a.0 as u16 + self.value + (self.status & FLAG_CARRY) as u16;
     //    carrycalc(result);
     //    zerocalc(result);
     //    overflowcalc(result, a, value);
@@ -637,11 +658,11 @@ impl CPU {
             if self.status & FLAG_DECIMAL != 0 {
                 self.flagclear(FLAG_CARRY);
 
-                if (self.a & 0x0F) > 0x09 {
-                    self.a += 0x06;
+                if (self.a.0 & 0x0F) > 0x09 {
+                    self.a += Wrapping(0x06);
                 }
-                if (self.a & 0xF0) > 0x90 {
-                    self.a += 0x60;
+                if (self.a.0 & 0xF0) > 0x90 {
+                    self.a += Wrapping(0x60);
                     self.flagset(FLAG_CARRY);
                 }
 
@@ -662,7 +683,7 @@ impl CPU {
     //    result = (uint16_t)a & value;
         self.penaltyop = 1;
         self.value = self.getvalue(mem);
-        self.result = (self.a as u16) & self.value;
+        self.result = (self.a.0 as u16) & self.value;
        
     //    zerocalc(result);
     //    signcalc(result);
@@ -705,7 +726,7 @@ impl CPU {
     //    }
         if (self.status & FLAG_CARRY) == 0 {
             self.oldpc = self.pc;
-            self.pc = self.pc.wrapping_add(self.reladdr);
+            self.pc = self.pc + Wrapping(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -727,7 +748,7 @@ impl CPU {
     //}
         if (self.status & FLAG_CARRY) == FLAG_CARRY {
             self.oldpc = self.pc;
-            self.pc = self.pc.wrapping_add(self.reladdr);
+            self.pc = self.pc + Wrapping(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -748,7 +769,7 @@ impl CPU {
     //}
         if (self.status & FLAG_ZERO) == FLAG_ZERO {
             self.oldpc = self.pc;
-            self.pc = self.pc.wrapping_add(self.reladdr);
+            self.pc = self.pc + Wrapping(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -767,7 +788,7 @@ impl CPU {
     //    status = (status & 0x3F) | (uint8_t)(value & 0xC0);
     //}
         self.value = self.getvalue(mem);
-        self.result = self.a as u16 & self.value;
+        self.result = self.a.0 as u16 & self.value;
 
         let r = self.result;
         self.flagcalc_zero(r);
@@ -785,7 +806,7 @@ impl CPU {
     //}
         if (self.status & FLAG_SIGN) == FLAG_SIGN {
             self.oldpc = self.pc;
-            self.pc = self.pc.wrapping_add(self.reladdr);
+            self.pc = self.pc + Wrapping(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -806,7 +827,7 @@ impl CPU {
     //}
         if (self.status & FLAG_ZERO) == 0 {
             self.oldpc = self.pc;
-            self.pc = self.pc.wrapping_add(self.reladdr);
+            self.pc = self.pc + Wrapping(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -827,7 +848,7 @@ impl CPU {
     //}
         if (self.status & FLAG_SIGN) == 0 {
             self.oldpc = self.pc;
-            self.pc = self.pc.wrapping_add(self.reladdr);
+            self.pc = self.pc + Wrapping(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -845,7 +866,7 @@ impl CPU {
     //    setinterrupt(); //set interrupt flag
     //    pc = (uint16_t)read6502(0xFFFE) | ((uint16_t)read6502(0xFFFF) << 8);
     //}
-        self.pc = self.pc.wrapping_add(1);
+        self.pc = self.pc + Wrapping(1);
         let (pc, stat) = (self.pc, self.status);
         self.push16(mem, pc); // original: "push next instruction address onto stack"
         self.push8(mem, stat | FLAG_BREAK); // original: "push CPU status to stack"
@@ -864,7 +885,7 @@ impl CPU {
     //}
         if (self.status & FLAG_OVERFLOW) == 0 {
             self.oldpc = self.pc;
-            self.pc = self.pc.wrapping_add(self.reladdr);
+            self.pc = self.pc + Wrapping(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -885,7 +906,7 @@ impl CPU {
     //}
         if (self.status & FLAG_OVERFLOW) == FLAG_OVERFLOW {
             self.oldpc = self.pc;
-            self.pc = self.pc.wrapping_add(self.reladdr);
+            self.pc = self.pc + Wrapping(self.reladdr);
             if (self.oldpc & 0xFF00) != (self.pc & 0xFF00) {
                 // original: "check if jump crossed a page boundary"
                 self.clockticks += 2;
@@ -930,7 +951,7 @@ impl CPU {
     //    value = getvalue();
         self.value = self.getvalue(mem);
     //    result = (uint16_t)a - value;
-        self.result = self.a as u16 - self.value;
+        self.result = self.a.0 as u16 - self.value;
        
     //    if (a >= (uint8_t)(value & 0x00FF)) setcarry();
     //        else clearcarry();
@@ -957,7 +978,7 @@ impl CPU {
     //    value = getvalue();
         self.value = self.getvalue(mem);
     //    result = (uint16_t)x - value;
-        self.result = self.x as u16 - self.value;
+        self.result = self.x.0 as u16 - self.value;
        
     //    if (x >= (uint8_t)(value & 0x00FF)) setcarry();
     //        else clearcarry();
@@ -986,7 +1007,7 @@ impl CPU {
     //    value = getvalue();
     //    result = (uint16_t)y - value;
         self.value = self.getvalue(mem);
-        self.result = self.y as u16 - self.value;
+        self.result = self.y.0 as u16 - self.value;
        
     //    if (y >= (uint8_t)(value & 0x00FF)) setcarry();
     //        else clearcarry();
@@ -1035,7 +1056,7 @@ impl CPU {
        
     //    zerocalc(x);
     //    signcalc(x);
-        let x = self.x as u16;
+        let x = self.x.0 as u16;
         self.flagcalc_zero(x);
         self.flagcalc_sign(x);
     //}
@@ -1048,7 +1069,7 @@ impl CPU {
        
     //    zerocalc(y);
     //    signcalc(y);
-        let y = self.y as u16;
+        let y = self.y.0 as u16;
         self.flagcalc_zero(y);
         self.flagcalc_sign(y);
     //}
@@ -1061,7 +1082,7 @@ impl CPU {
     //    value = getvalue();
     //    result = (uint16_t)a ^ value;
         self.value = self.getvalue(mem);
-        self.result = self.a as u16 ^ self.value;
+        self.result = self.a.0 as u16 ^ self.value;
        
     //    zerocalc(result);
     //    signcalc(result);
@@ -1099,7 +1120,7 @@ impl CPU {
        
     //    zerocalc(x);
     //    signcalc(x);
-        let x = self.x as u16;
+        let x = self.x.0 as u16;
         self.flagcalc_zero(x);
         self.flagcalc_sign(x);
     //}
@@ -1112,7 +1133,7 @@ impl CPU {
        
     //    zerocalc(y);
     //    signcalc(y);
-        let y = self.y as u16;
+        let y = self.y.0 as u16;
         self.flagcalc_zero(y);
         self.flagcalc_sign(y);
     //}
@@ -1146,7 +1167,7 @@ impl CPU {
        
     //    zerocalc(a);
     //    signcalc(a);
-        let a = self.a as u16;
+        let a = self.a.0 as u16;
         self.flagcalc_zero(a);
         self.flagcalc_sign(a);
     //}
@@ -1163,7 +1184,7 @@ impl CPU {
        
     //    zerocalc(x);
     //    signcalc(x);
-        let x = self.x as u16;
+        let x = self.x.0 as u16;
         self.flagcalc_zero(x);
         self.flagcalc_sign(x);
     //}
@@ -1180,7 +1201,7 @@ impl CPU {
        
     //    zerocalc(y);
     //    signcalc(y);
-        let y = self.y as u16;
+        let y = self.y.0 as u16;
         self.flagcalc_zero(y);
         self.flagcalc_sign(y);
     //}
@@ -1240,7 +1261,7 @@ impl CPU {
     //    result = (uint16_t)a | value;
         self.penaltyop = 1;
         self.value = self.getvalue(mem);
-        self.result = self.a as u16 | self.value;
+        self.result = self.a.0 as u16 | self.value;
        
     //    zerocalc(result);
     //    signcalc(result);
@@ -1276,7 +1297,7 @@ impl CPU {
        
     //    zerocalc(a);
     //    signcalc(a);
-        let a = self.a as u16;
+        let a = self.a.0 as u16;
         self.flagcalc_zero(a);
         self.flagcalc_sign(a);
     //}
@@ -1358,7 +1379,7 @@ impl CPU {
     //    result = (uint16_t)a + value + (uint16_t)(status & FLAG_CARRY);
         self.penaltyop = 1;
         self.value = self.getvalue(mem) ^ 0x00FF;
-        self.result = self.a as u16 + self.value + (self.status & FLAG_CARRY) as u16;
+        self.result = self.a.0 as u16 + self.value + (self.status & FLAG_CARRY) as u16;
        
     //    carrycalc(result);
     //    zerocalc(result);
@@ -1391,11 +1412,11 @@ impl CPU {
                 // TODO: This is definitely going to overflow sometimes, we should probably have
                 // figured out what to do earlier...
                 self.a -= 0x66;
-                if (self.a & 0x0F) > 0x09 {
-                    self.a += 0x06;
+                if (self.a.0 self.a & 0x0F) > 0x09 {
+                    self.a += Wrapping(0x06);
                 }
-                if (self.a & 0xF0) > 0x90 {
-                    self.a += 0x60;
+                if (self.a.0 self.a & 0xF0) > 0x90 {
+                    self.a += Wrapping(0x60);
                     self.flagset(FLAG_CARRY);
                 }
 
@@ -1435,7 +1456,7 @@ impl CPU {
     //static void sta() {
     fn inst_sta<T: Backplane>(&mut self, mem: &mut T) {
     //    putvalue(a);
-        let a = self.a as u16;
+        let a = self.a.0 as u16;
         self.putvalue(mem, a);
     //}
     }
@@ -1443,7 +1464,7 @@ impl CPU {
     //static void stx() {
     fn inst_stx<T: Backplane>(&mut self, mem: &mut T) {
     //    putvalue(x);
-        let x = self.x as u16;
+        let x = self.x.0 as u16;
         self.putvalue(mem, x);
     //}
     }
@@ -1451,7 +1472,7 @@ impl CPU {
     //static void sty() {
     fn inst_sty<T: Backplane>(&mut self, mem: &mut T) {
     //    putvalue(y);
-        let y = self.y as u16;
+        let y = self.y.0 as u16;
         self.putvalue(mem, y);
     //}
     }
@@ -1463,7 +1484,7 @@ impl CPU {
        
     //    zerocalc(x);
     //    signcalc(x);
-        let x = self.x as u16;
+        let x = self.x.0 as u16;
         self.flagcalc_zero(x);
         self.flagcalc_sign(x);
     //}
@@ -1476,7 +1497,7 @@ impl CPU {
        
     //    zerocalc(y);
     //    signcalc(y);
-        let y = self.y as u16;
+        let y = self.y.0 as u16;
         self.flagcalc_zero(y);
         self.flagcalc_sign(y);
     //}
@@ -1489,7 +1510,7 @@ impl CPU {
        
     //    zerocalc(x);
     //    signcalc(x);
-        let x = self.x as u16;
+        let x = self.x.0 as u16;
         self.flagcalc_zero(x);
         self.flagcalc_sign(x);
     //}
@@ -1502,7 +1523,7 @@ impl CPU {
        
     //    zerocalc(a);
     //    signcalc(a);
-        let a = self.a as u16;
+        let a = self.a.0 as u16;
         self.flagcalc_zero(a);
         self.flagcalc_sign(a);
     //}
@@ -1522,7 +1543,7 @@ impl CPU {
        
     //    zerocalc(a);
     //    signcalc(a);
-        let a = self.a as u16;
+        let a = self.a.0 as u16;
         self.flagcalc_zero(a);
         self.flagcalc_sign(a);
     //}
@@ -1641,8 +1662,8 @@ impl CPU {
         while self.clockticks < self.clockgoal {
     //        opcode = read6502(pc++);
     //        status |= FLAG_CONSTANT;
-            self.opcode = mem.read(self.pc);
-            self.pc = self.pc.wrapping_add(1);
+            self.opcode = mem.read(self.pc.0);
+            self.pc = self.pc + Wrapping(1);
             self.flagset(FLAG_CONSTANT);
 
     //        penaltyop = 0;
