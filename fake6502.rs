@@ -153,18 +153,18 @@ const BASE_STACK: u16 = 0x100;
 //uint16_t oldpc, ea, reladdr, value, result;
 //uint8_t opcode, oldstatus;
 
-struct CPU {
+pub struct CPU {
     /* 6502 CPU registers: */
-    pc: u16,
-    sp: u8,
-    a: u8,
-    x: u8,
-    y: u8,
-    status: u8,
+    pub pc: u16,
+    pub sp: u8,
+    pub a: u8,
+    pub x: u8,
+    pub y: u8,
+    pub status: u8,
 
     /* Helper variables: */
-    instructions_ran: u32,
-    clockticks: u32,
+    pub instructions_ran: u32,
+    pub clockticks: u32,
     clockgoal: u32,
     // This variable is here because some C code tests whether the current addressing mode is 'acc'
     // (accumulator) by checking against the function lookup tables the C version of this emulator
@@ -186,31 +186,36 @@ struct CPU {
     result: u16,
     opcode: u8,
     oldstatus: u8,
+
+    // Call the Backplane::each_instr() method after every instruction?
+    pub do_callback: bool,
 }
 
 //externally supplied functions
 //extern uint8_t read6502(uint16_t address);
 //extern void write6502(uint16_t address, uint8_t value);
 
-trait Memory {
+pub trait Backplane {
     // It might make sense to just use a &mut [u8] for example, but I feel like there's probably a
     // reason the original code did it this way: Any special behavior or mappings for special
     // memory addresses you want to have in the callback function, you can have.  (Consider e.g.
     // real systems where writing to a particular address actually controlled hardware.)
     fn read(&self, address: u16) -> u8;
     fn write(&mut self, address: u16, value: u8);
+
+    fn each_instr(&mut self, cpu: &mut CPU) -> bool;
 }
 
 impl CPU {
     // You're going to notice that nearly all of these functions take a 'mem' value that must imply
-    // trait Memory as an argument argument alongside the CPU struct.
+    // trait Backplane as an argument argument alongside the CPU struct.
     //
     // This may prove to have been a mistake, or may not. I felt that it would allow for more
     // flexibility on the caller's part and perhaps less borrowing tangles if we do not require the
     // CPU struct to own its memory.
 
-    fn new() -> CPU {
-        CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, addr_acc: false, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, penaltyaddr: 0, penaltyop: 0, value: 0, result: 0, opcode: 0, oldstatus: 0 }
+    pub fn new() -> CPU {
+        CPU { pc: 0, sp: 0xFD, a: 0, x: 0, y: 0, status: 0, addr_acc: false, instructions_ran: 0, clockticks: 0, clockgoal: 0, oldpc: 0, ea: 0, reladdr: 0, penaltyaddr: 0, penaltyop: 0, value: 0, result: 0, opcode: 0, oldstatus: 0, do_callback: true }
     }
 
     // TODO: Figure out how to deal with the overflow problem. In C, it would have wrapped around,
@@ -233,7 +238,7 @@ impl CPU {
     //    write6502(BASE_STACK + ((sp - 1) & 0xFF), pushval & 0xFF);
     //    sp -= 2;
     //}
-    fn push16<T: Memory>(&mut self, mem: &mut T, pushval: u16) {
+    fn push16<T: Backplane>(&mut self, mem: &mut T, pushval: u16) {
         mem.write(BASE_STACK + (self.sp as u16), ((pushval >> 8) & 0x00FF) as u8);
         self.sp -= 1;
         mem.write(BASE_STACK + (self.sp as u16), (pushval & 0x00FF) as u8);
@@ -243,7 +248,7 @@ impl CPU {
     //void push8(uint8_t pushval) {
     //    write6502(BASE_STACK + sp--, pushval);
     //}
-    fn push8<T: Memory>(&mut self, mem: &mut T, pushval: u8) {
+    fn push8<T: Backplane>(&mut self, mem: &mut T, pushval: u8) {
         mem.write(BASE_STACK + (self.sp as u16), pushval);
         self.sp -= 1;
     }
@@ -254,7 +259,7 @@ impl CPU {
     //    sp += 2;
     //    return(temp16);
     //}
-    fn pull16<T: Memory>(&mut self, mem: &T) -> u16 {
+    fn pull16<T: Backplane>(&mut self, mem: &T) -> u16 {
         let mut val: u16 = mem.read(BASE_STACK + ((self.sp as u16 + 1) & 0x00FF)) as u16;
         val            |= (mem.read(BASE_STACK + ((self.sp as u16 + 2) & 0x00FF)) as u16) << 8;
         self.sp += 2;
@@ -264,7 +269,7 @@ impl CPU {
     //uint8_t pull8() {
     //    return (read6502(BASE_STACK + ++sp));
     //}
-    fn pull8<T: Memory>(&mut self, mem: &T) -> u8 {
+    fn pull8<T: Backplane>(&mut self, mem: &T) -> u8 {
         let val = mem.read(BASE_STACK + (self.sp as u16));
         self.sp += 1;
         val
@@ -278,7 +283,7 @@ impl CPU {
     //    sp = 0xFD;
     //    status |= FLAG_CONSTANT;
     //}
-    fn reset<T: Memory>(&mut self, mem: &T) {
+    fn reset<T: Backplane>(&mut self, mem: &T) {
         self.pc = mem.read(0xFFFC) as u16 | ((mem.read(0xFFFD) as u16) << 8);
         self.a = 0;
         self.x = 0;
@@ -291,19 +296,19 @@ impl CPU {
     //addressing mode functions, calculates effective addresses
     //static void imp() { //implied
     //}
-    fn addr_implied<T: Memory>(&mut self, _mem: &T) {
+    fn addr_implied<T: Backplane>(&mut self, _mem: &T) {
     }
 
     //static void acc() { //accumulator
     //}
-    fn addr_accumulator<T: Memory>(&mut self, _mem: &T) {
+    fn addr_accumulator<T: Backplane>(&mut self, _mem: &T) {
         self.addr_acc = true;
     }
 
     //static void imm() { //immediate
     //    ea = pc++;
     //}
-    fn addr_immediate<T: Memory>(&mut self, _mem: &T) {
+    fn addr_immediate<T: Backplane>(&mut self, _mem: &T) {
         self.ea = self.pc as u16;
         self.pc = self.pc.wrapping_add(1);
     }
@@ -311,7 +316,7 @@ impl CPU {
     //static void zp() { //zero-page
     //    ea = (uint16_t)read6502((uint16_t)pc++);
     //}
-    fn addr_zeropage<T: Memory>(&mut self, mem: &T) {
+    fn addr_zeropage<T: Backplane>(&mut self, mem: &T) {
         self.ea = mem.read(self.pc) as u16;
         self.pc = self.pc.wrapping_add(1);
     }
@@ -319,7 +324,7 @@ impl CPU {
     //static void zpx() { //zero-page,X
     //    ea = ((uint16_t)read6502((uint16_t)pc++) + (uint16_t)x) & 0xFF; //zero-page wraparound
     //}
-    fn addr_zeropage_x<T: Memory>(&mut self, mem: &T) {
+    fn addr_zeropage_x<T: Backplane>(&mut self, mem: &T) {
         self.ea = mem.read(self.pc) as u16 + (self.x as u16 & 0x00FF);
         // ( the & 0x00FF thing for zero-page wraparound)
         self.pc = self.pc.wrapping_add(1);
@@ -328,7 +333,7 @@ impl CPU {
     //static void zpy() { //zero-page,Y
     //    ea = ((uint16_t)read6502((uint16_t)pc++) + (uint16_t)y) & 0xFF; //zero-page wraparound
     //}
-    fn addr_zeropage_y<T: Memory>(&mut self, mem: &T) {
+    fn addr_zeropage_y<T: Backplane>(&mut self, mem: &T) {
         self.ea = mem.read(self.pc) as u16 + (self.y as u16 & 0x00FF);
         // ( the & 0x00FF thing maybe for zero-page wraparound? blehhh)
         self.pc = self.pc.wrapping_add(1);
@@ -338,7 +343,7 @@ impl CPU {
     //    reladdr = (uint16_t)read6502(pc++);
     //    if (reladdr & 0x80) reladdr |= 0xFF00;
     //}
-    fn addr_relative_branch<T: Memory>(&mut self, mem: &T) {
+    fn addr_relative_branch<T: Backplane>(&mut self, mem: &T) {
         self.reladdr = mem.read(self.pc) as u16;
         if self.reladdr & 0x0080 != 0 {
             self.reladdr |= 0xFF00;
@@ -350,7 +355,7 @@ impl CPU {
     //    ea = (uint16_t)read6502(pc) | ((uint16_t)read6502(pc+1) << 8);
     //    pc += 2;
     //}
-    fn addr_absolute<T: Memory>(&mut self, mem: &T) {
+    fn addr_absolute<T: Backplane>(&mut self, mem: &T) {
         self.ea = mem.read(self.pc) as u16;
         self.ea |= (mem.read(self.pc + 1) as u16) << 8;
         self.pc = self.pc.wrapping_add(2);
@@ -368,7 +373,7 @@ impl CPU {
 
     //    pc += 2;
     //}
-    fn addr_absolute_x<T: Memory>(&mut self, mem: &T) {
+    fn addr_absolute_x<T: Backplane>(&mut self, mem: &T) {
         let startpage: u16;
         self.ea = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
         startpage = self.ea & 0xFF00;
@@ -394,7 +399,7 @@ impl CPU {
 
     //    pc += 2;
     //}
-    fn addr_absolute_y<T: Memory>(&mut self, mem: &T) {
+    fn addr_absolute_y<T: Backplane>(&mut self, mem: &T) {
         let startpage: u16;
         self.ea = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
         startpage = self.ea & 0xFF00;
@@ -415,7 +420,7 @@ impl CPU {
     //    ea = (uint16_t)read6502(eahelp) | ((uint16_t)read6502(eahelp2) << 8);
     //    pc += 2;
     //}
-    fn addr_indirect<T: Memory>(&mut self, mem: &T) {
+    fn addr_indirect<T: Backplane>(&mut self, mem: &T) {
         let eahelp: u16;
         let eahelp2: u16;
         eahelp = mem.read(self.pc) as u16 | (mem.read(self.pc + 1) as u16) << 8;
@@ -430,7 +435,7 @@ impl CPU {
     //    eahelp = (uint16_t)(((uint16_t)read6502(pc++) + (uint16_t)x) & 0xFF); //zero-page wraparound for table pointer
     //    ea = (uint16_t)read6502(eahelp & 0x00FF) | ((uint16_t)read6502((eahelp+1) & 0x00FF) << 8);
     //}
-    fn addr_indirect_x<T: Memory>(&mut self, mem: &T) {
+    fn addr_indirect_x<T: Backplane>(&mut self, mem: &T) {
         let eahelp: u16;
         eahelp = (mem.read(self.pc) as u16 + self.x as u16) & 0x00FF; // original: "zero-page wraparound for table"
         self.ea = mem.read(eahelp & 0x00FF) as u16 | (mem.read((eahelp + 1) & 0x00FF) as u16) << 8;
@@ -449,7 +454,7 @@ impl CPU {
     //        penaltyaddr = 1;
     //    }
     //}
-    fn addr_indirect_y<T: Memory>(&mut self, mem: &T) {
+    fn addr_indirect_y<T: Backplane>(&mut self, mem: &T) {
         let eahelp: u16 = mem.read(self.pc) as u16;
         self.pc = self.pc.wrapping_add(1);
         let eahelp2: u16 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); // original: "zero-page wraparound"
@@ -467,7 +472,7 @@ impl CPU {
     //    if (addrtable[opcode] == acc) return((uint16_t)a);
     //        else return((uint16_t)read6502(ea));
     //}
-    fn getvalue<T: Memory>(&mut self, mem: &T) -> u16 {
+    fn getvalue<T: Backplane>(&mut self, mem: &T) -> u16 {
         // But why is it u16...?
         if self.addr_acc {
             self.a as u16
@@ -479,7 +484,7 @@ impl CPU {
     //static uint16_t getvalue16() {
     //    return((uint16_t)read6502(ea) | ((uint16_t)read6502(ea+1) << 8));
     //}
-    fn getvalue_16<T: Memory>(&mut self, mem: &T) -> u16 {
+    fn getvalue_16<T: Backplane>(&mut self, mem: &T) -> u16 {
         mem.read(self.ea) as u16 | ((mem.read(self.ea + 1) as u16) << 8)
     }
 
@@ -487,7 +492,7 @@ impl CPU {
     //    if (addrtable[opcode] == acc) a = (uint8_t)(saveval & 0x00FF);
     //        else write6502(ea, (saveval & 0x00FF));
     //}
-    fn putvalue<T: Memory>(&mut self, mem: &mut T, saveval: u16) {
+    fn putvalue<T: Backplane>(&mut self, mem: &mut T, saveval: u16) {
         if self.addr_acc {
             self.a = (saveval & 0x00FF) as u8;
         } else {
@@ -589,7 +594,7 @@ impl CPU {
 
     //instruction handler functions
     //static void adc() {
-    fn inst_adc<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_adc<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
         self.penaltyop = 1;
     //    value = getvalue();
@@ -651,7 +656,7 @@ impl CPU {
     }
 
     //static void and() {
-    fn inst_and<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_and<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    result = (uint16_t)a & value;
@@ -671,7 +676,7 @@ impl CPU {
     }
 
     //static void asl() {
-    fn inst_asl<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_asl<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = value << 1;
         self.value = self.getvalue(mem);
@@ -691,7 +696,7 @@ impl CPU {
     }
 
     //static void bcc() {
-    fn inst_bcc<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_bcc<T: Backplane>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_CARRY) == 0) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -712,7 +717,7 @@ impl CPU {
     }
 
     //static void bcs() {
-    fn inst_bcs<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_bcs<T: Backplane>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_CARRY) == FLAG_CARRY) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -733,7 +738,7 @@ impl CPU {
     }
 
     //static void beq() {
-    fn inst_beq<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_beq<T: Backplane>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_ZERO) == FLAG_ZERO) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -754,7 +759,7 @@ impl CPU {
     }
 
     //static void bit() {
-    fn inst_bit<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_bit<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = (uint16_t)a & value;
        
@@ -770,7 +775,7 @@ impl CPU {
     }
 
     //static void bmi() {
-    fn inst_bmi<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_bmi<T: Backplane>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_SIGN) == FLAG_SIGN) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -791,7 +796,7 @@ impl CPU {
     }
 
     //static void bne() {
-    fn inst_bne<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_bne<T: Backplane>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_ZERO) == 0) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -812,7 +817,7 @@ impl CPU {
     }
 
     //static void bpl() {
-    fn inst_bpl<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_bpl<T: Backplane>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_SIGN) == 0) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -833,7 +838,7 @@ impl CPU {
     }
 
     //static void brk() {
-    fn inst_brk<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_brk<T: Backplane>(&mut self, mem: &mut T) {
     //    pc++;
     //    push16(pc); //push next instruction address onto stack
     //    push8(status | FLAG_BREAK); //push CPU status to stack
@@ -849,7 +854,7 @@ impl CPU {
     }
 
     //static void bvc() {
-    fn inst_bvc<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_bvc<T: Backplane>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_OVERFLOW) == 0) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -870,7 +875,7 @@ impl CPU {
     }
 
     //static void bvs() {
-    fn inst_bvs<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_bvs<T: Backplane>(&mut self, _mem: &mut T) {
     //    if ((status & FLAG_OVERFLOW) == FLAG_OVERFLOW) {
     //        oldpc = pc;
     //        pc += reladdr;
@@ -893,33 +898,33 @@ impl CPU {
     //static void clc() {
     //    clearcarry();
     //}
-    fn inst_clc<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_clc<T: Backplane>(&mut self, _mem: &mut T) {
         self.flagclear(FLAG_CARRY);
     }
 
     //static void cld() {
     //    cleardecimal();
     //}
-    fn inst_cld<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_cld<T: Backplane>(&mut self, _mem: &mut T) {
         self.flagclear(FLAG_DECIMAL);
     }
 
     //static void cli() {
     //    clearinterrupt();
     //}
-    fn inst_cli<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_cli<T: Backplane>(&mut self, _mem: &mut T) {
         self.flagclear(FLAG_INTERRUPT);
     }
 
     //static void clv() {
     //    clearoverflow();
     //}
-    fn inst_clv<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_clv<T: Backplane>(&mut self, _mem: &mut T) {
         self.flagclear(FLAG_OVERFLOW);
     }
 
     //static void cmp() {
-    fn inst_cmp<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_cmp<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
         self.penaltyop = 1;
     //    value = getvalue();
@@ -948,7 +953,7 @@ impl CPU {
     //}
 
     //static void cpx() {
-    fn inst_cpx<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_cpx<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
         self.value = self.getvalue(mem);
     //    result = (uint16_t)x - value;
@@ -977,7 +982,7 @@ impl CPU {
     }
 
     //static void cpy() {
-    fn inst_cpy<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_cpy<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = (uint16_t)y - value;
         self.value = self.getvalue(mem);
@@ -1006,7 +1011,7 @@ impl CPU {
     }
 
     //static void dec() {
-    fn inst_dec<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_dec<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = value - 1;
         self.value = self.getvalue(mem);
@@ -1024,7 +1029,7 @@ impl CPU {
     }
 
     //static void dex() {
-    fn inst_dex<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_dex<T: Backplane>(&mut self, _mem: &mut T) {
     //    x--;
         self.x -= 1;
        
@@ -1037,7 +1042,7 @@ impl CPU {
     }
 
     //static void dey() {
-    fn inst_dey<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_dey<T: Backplane>(&mut self, _mem: &mut T) {
     //    y--;
         self.y -= 1;
        
@@ -1050,7 +1055,7 @@ impl CPU {
     }
 
     //static void eor() {
-    fn inst_eor<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_eor<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
         self.penaltyop = 1;
     //    value = getvalue();
@@ -1070,7 +1075,7 @@ impl CPU {
     }
 
     //static void inc() {
-    fn inst_inc<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_inc<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = value + 1;
         self.value = self.getvalue(mem);
@@ -1088,7 +1093,7 @@ impl CPU {
     }
 
     //static void inx() {
-    fn inst_inx<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_inx<T: Backplane>(&mut self, _mem: &mut T) {
     //    x++;
         self.x += 1;
        
@@ -1101,7 +1106,7 @@ impl CPU {
     }
 
     //static void iny() {
-    fn inst_iny<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_iny<T: Backplane>(&mut self, _mem: &mut T) {
     //    y++;
         self.y += 1;
        
@@ -1114,14 +1119,14 @@ impl CPU {
     }
 
     //static void jmp() {
-    fn inst_jmp<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_jmp<T: Backplane>(&mut self, _mem: &mut T) {
     //    pc = ea;
         self.pc = self.ea;
     //}
     }
 
     //static void jsr() {
-    fn inst_jsr<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_jsr<T: Backplane>(&mut self, mem: &mut T) {
     //    push16(pc - 1);
     //    pc = ea;
         let pc = self.pc - 1;
@@ -1131,7 +1136,7 @@ impl CPU {
     }
 
     //static void lda() {
-    fn inst_lda<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_lda<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    a = (uint8_t)(value & 0x00FF);
@@ -1148,7 +1153,7 @@ impl CPU {
     }
 
     //static void ldx() {
-    fn inst_ldx<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_ldx<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    x = (uint8_t)(value & 0x00FF);
@@ -1165,7 +1170,7 @@ impl CPU {
     }
 
     //static void ldy() {
-    fn inst_ldy<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_ldy<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    y = (uint8_t)(value & 0x00FF);
@@ -1182,7 +1187,7 @@ impl CPU {
     }
 
     //static void lsr() {
-    fn inst_lsr<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_lsr<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = value >> 1;
         self.value = self.getvalue(mem);
@@ -1208,7 +1213,7 @@ impl CPU {
     }
 
     //static void nop() {
-    fn inst_nop<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_nop<T: Backplane>(&mut self, _mem: &mut T) {
     //    switch (opcode) {
         match self.opcode {
             0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
@@ -1229,7 +1234,7 @@ impl CPU {
     }
 
     //static void ora() {
-    fn inst_ora<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_ora<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue();
     //    result = (uint16_t)a | value;
@@ -1249,7 +1254,7 @@ impl CPU {
     }
 
     //static void pha() {
-    fn inst_pha<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_pha<T: Backplane>(&mut self, mem: &mut T) {
     //    push8(a);
         let a = self.a;
         self.push8(mem, a);
@@ -1257,7 +1262,7 @@ impl CPU {
     }
 
     //static void php() {
-    fn inst_php<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_php<T: Backplane>(&mut self, mem: &mut T) {
     //    push8(status | FLAG_BREAK);
         let s = self.status | FLAG_BREAK;
         self.push8(mem, s);
@@ -1265,7 +1270,7 @@ impl CPU {
     }
 
     //static void pla() {
-    fn inst_pla<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_pla<T: Backplane>(&mut self, mem: &mut T) {
     //    a = pull8();
         self.a = self.pull8(mem);
        
@@ -1278,14 +1283,14 @@ impl CPU {
     }
 
     //static void plp() {
-    fn inst_plp<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_plp<T: Backplane>(&mut self, mem: &mut T) {
     //    status = pull8() | FLAG_CONSTANT;
         self.status = self.pull8(mem) | FLAG_CONSTANT;
     //}
     }
 
     //static void rol() {
-    fn inst_rol<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_rol<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = (value << 1) | (status & FLAG_CARRY);
         self.value = self.getvalue(mem);
@@ -1305,7 +1310,7 @@ impl CPU {
     }
 
     //static void ror() {
-    fn inst_ror<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_ror<T: Backplane>(&mut self, mem: &mut T) {
     //    value = getvalue();
     //    result = (value >> 1) | ((status & FLAG_CARRY) << 7);
         self.value = self.getvalue(mem);
@@ -1327,7 +1332,7 @@ impl CPU {
     }
 
     //static void rti() {
-    fn inst_rti<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_rti<T: Backplane>(&mut self, mem: &mut T) {
     //    status = pull8();
     //    value = pull16();
     //    pc = value;
@@ -1338,7 +1343,7 @@ impl CPU {
     }
 
     //static void rts() {
-    fn inst_rts<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_rts<T: Backplane>(&mut self, mem: &mut T) {
     //    value = pull16();
     //    pc = value + 1;
         self.value = self.pull16(mem);
@@ -1347,7 +1352,7 @@ impl CPU {
     }
 
     //static void sbc() {
-    fn inst_sbc<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_sbc<T: Backplane>(&mut self, mem: &mut T) {
     //    penaltyop = 1;
     //    value = getvalue() ^ 0x00FF;
     //    result = (uint16_t)a + value + (uint16_t)(status & FLAG_CARRY);
@@ -1407,28 +1412,28 @@ impl CPU {
     }
 
     //static void sec() {
-    fn inst_sec<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_sec<T: Backplane>(&mut self, _mem: &mut T) {
     //    setcarry();
         self.flagset(FLAG_CARRY);
     //}
     }
 
     //static void sed() {
-    fn inst_sed<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_sed<T: Backplane>(&mut self, _mem: &mut T) {
     //    setdecimal();
         self.flagset(FLAG_DECIMAL);
     //}
     }
 
     //static void sei() {
-    fn inst_sei<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_sei<T: Backplane>(&mut self, _mem: &mut T) {
     //    setinterrupt();
         self.flagset(FLAG_INTERRUPT);
     //}
     }
 
     //static void sta() {
-    fn inst_sta<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_sta<T: Backplane>(&mut self, mem: &mut T) {
     //    putvalue(a);
         let a = self.a as u16;
         self.putvalue(mem, a);
@@ -1436,7 +1441,7 @@ impl CPU {
     }
 
     //static void stx() {
-    fn inst_stx<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_stx<T: Backplane>(&mut self, mem: &mut T) {
     //    putvalue(x);
         let x = self.x as u16;
         self.putvalue(mem, x);
@@ -1444,7 +1449,7 @@ impl CPU {
     }
 
     //static void sty() {
-    fn inst_sty<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_sty<T: Backplane>(&mut self, mem: &mut T) {
     //    putvalue(y);
         let y = self.y as u16;
         self.putvalue(mem, y);
@@ -1452,7 +1457,7 @@ impl CPU {
     }
 
     //static void tax() {
-    fn inst_tax<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_tax<T: Backplane>(&mut self, _mem: &mut T) {
     //    x = a;
         self.x = self.a;
        
@@ -1465,7 +1470,7 @@ impl CPU {
     }
 
     //static void tay() {
-    fn inst_tay<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_tay<T: Backplane>(&mut self, _mem: &mut T) {
     //    y = a;
         self.y = self.a;
        
@@ -1478,7 +1483,7 @@ impl CPU {
     }
 
     //static void tsx() {
-    fn inst_tsx<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_tsx<T: Backplane>(&mut self, _mem: &mut T) {
     //    x = sp;
         self.x = self.sp;
        
@@ -1491,7 +1496,7 @@ impl CPU {
     }
 
     //static void txa() {
-    fn inst_txa<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_txa<T: Backplane>(&mut self, _mem: &mut T) {
     //    a = x;
         self.a = self.x;
        
@@ -1504,14 +1509,14 @@ impl CPU {
     }
 
     //static void txs() {
-    fn inst_txs<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_txs<T: Backplane>(&mut self, _mem: &mut T) {
     //    sp = x;
         self.sp = self.x;
     //}
     }
 
     //static void tya() {
-    fn inst_tya<T: Memory>(&mut self, _mem: &mut T) {
+    fn inst_tya<T: Backplane>(&mut self, _mem: &mut T) {
     //    a = y;
         self.a = self.y;
        
@@ -1530,7 +1535,7 @@ impl CPU {
     //        lda();
     //        ldx();
     //    }
-    fn inst_lax<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_lax<T: Backplane>(&mut self, mem: &mut T) {
         self.inst_nop(mem);
     }
 
@@ -1540,7 +1545,7 @@ impl CPU {
     //        putvalue(a & x);
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
-    fn inst_sax<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_sax<T: Backplane>(&mut self, mem: &mut T) {
         self.inst_nop(mem);
     }
 
@@ -1549,7 +1554,7 @@ impl CPU {
     //        cmp();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
-    fn inst_dcp<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_dcp<T: Backplane>(&mut self, mem: &mut T) {
         self.inst_nop(mem);
     }
 
@@ -1558,7 +1563,7 @@ impl CPU {
     //        sbc();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
-    fn inst_isb<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_isb<T: Backplane>(&mut self, mem: &mut T) {
         self.inst_nop(mem);
     }
 
@@ -1567,7 +1572,7 @@ impl CPU {
     //        ora();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
-    fn inst_slo<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_slo<T: Backplane>(&mut self, mem: &mut T) {
         self.inst_nop(mem);
     }
 
@@ -1576,7 +1581,7 @@ impl CPU {
     //        and();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
-    fn inst_rla<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_rla<T: Backplane>(&mut self, mem: &mut T) {
         self.inst_nop(mem);
     }
 
@@ -1585,7 +1590,7 @@ impl CPU {
     //        eor();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
-    fn inst_sre<T: Memory>(&mut self, mem: &mut T) {
+    fn inst_sre<T: Backplane>(&mut self, mem: &mut T) {
         self.inst_nop(mem);
     }
 
@@ -1594,7 +1599,7 @@ impl CPU {
     //        adc();
     //        if (penaltyop && penaltyaddr) clockticks6502--;
     //    }
-     fn inst_rra<T: Memory>(&mut self, mem: &mut T) {
+     fn inst_rra<T: Backplane>(&mut self, mem: &mut T) {
         self.inst_nop(mem);
     }
 
@@ -1628,7 +1633,7 @@ impl CPU {
     //void (*loopexternal)();
 
     //void exec6502(uint32_t tickcount) {
-    fn exec<T: Memory>(&mut self, mem: &mut T, tickcount: u32) {
+    pub fn exec<T: Backplane, F: FnMut(&mut CPU) -> ()>(&mut self, mem: &mut T, tickcount: u32, callback: Option<F>) {
     //    clockgoal6502 += tickcount;
         self.clockgoal += tickcount;
 
@@ -1666,7 +1671,7 @@ impl CPU {
         }
     }
 
-    fn run_one_op<T: Memory>(&mut self, mem: &mut T) -> u32 {
+    fn run_one_op<T: Backplane>(&mut self, mem: &mut T) -> u32 {
         // Okay, so I decided to convert the tables of function pointers in the original into a
         // giant match statement after seeing a comment that stated LLVM would be able to optimize
         // said match statement into a jump table anyway, but unfortunately this means that we do
@@ -2037,24 +2042,25 @@ impl CPU {
 //}
 
 /* For testing purposes */
-struct DbgMem {
-    mem: [u8; 65535],
-}
-impl Memory for DbgMem {
-    fn read(&self, address: u16) -> u8 {
-        println!("READ: {} (returning 0)", address);
-        self.mem[address as usize]
-    }
-    fn write(&mut self, address: u16, value: u8) {
-        println!("WRITE: Set address {} = {}", address, value);
-        self.mem[address as usize] = value;
-    }
-}
-fn main() {
-    let mut tpu = CPU::new();
-    let mut dbgm = DbgMem { mem: [0 as u8; 65535] };
-    let our_val: u16 = 65535;
-    tpu.push16(&mut dbgm, our_val);
-    assert!(tpu.pull16(&mut dbgm) == our_val);
-    tpu.inst_lda(&mut dbgm);
-}
+// struct DbgMem {
+//     mem: [u8; std::u16::MAX as usize + 1],
+// }
+// impl Backplane for DbgMem {
+//     fn read(&self, address: u16) -> u8 {
+//         println!("READ: {} (returning {})", address, self.mem[address as usize]);
+//         self.mem[address as usize]
+//     }
+//     fn write(&mut self, address: u16, value: u8) {
+//         println!("WRITE: Set address {} = {}", address, value);
+//         self.mem[address as usize] = value;
+//     }
+// }
+// fn main() {
+//     let mut tpu = CPU::new();
+//     let mut dbgm = DbgMem { mem: [0 as u8; std::u16::MAX as usize + 1] };
+//     let our_val: u16 = 65535;
+//     tpu.push16(&mut dbgm, our_val);
+//     assert!(tpu.pull16(&mut dbgm) == our_val);
+//     tpu.inst_lda(&mut dbgm);
+//     //tpu.exec::<DbgMem, FnMut(&mut CPU) -> ()>(&mut dbgm, 100, None);
+// }
